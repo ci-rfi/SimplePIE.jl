@@ -305,6 +305,7 @@ function rotation_sweep(output_file, 𝒜, dₛ, n, N, Δx, α, Δf, Δk, mean_a
         end
     findmax(first.(phase_max_min) - last.(phase_max_min))
 end
+
 @option struct PtychoParams
     # N::Int
     # n::Int
@@ -343,13 +344,13 @@ end
 # Δx = uconvert(Å, λ/θ)
 # Δf = -13μm
 
-offset = uconvert(Å, (0.5N+1) * Δx)
-positions = define_probe_positions(dₛ, θᵣ, n; offset=[offset, offset])
+# offset = uconvert(Å, (0.5N+1) * Δx)
+# positions = define_probe_positions(dₛ, θᵣ, n; offset=[offset, offset])
 
-𝒜 = ThreadsX.map(x -> fftshift(sqrt.(x)) |> Matrix{Float32}, dps)
-𝒪, ℴ = make_object(positions, N, Δx) 
-𝒫 = make_probe(α, N, Δf, Δk, Δx; mean_amplitude_sum=sum(sqrt.(mean(dps))))
-plot_wave(𝒫; unwrap_phase=true)
+# 𝒜 = ThreadsX.map(x -> fftshift(sqrt.(x)) |> Matrix{Float32}, dps)
+# 𝒪, ℴ = make_object(positions, N, Δx) 
+# 𝒫 = make_probe(α, N, Δf, Δk, Δx; mean_amplitude_sum=sum(sqrt.(mean(dps))))
+# plot_wave(𝒫; unwrap_phase=true)
 
 # nᵢ = 3
 # for _ in 1:nᵢ
@@ -359,7 +360,8 @@ plot_wave(𝒫; unwrap_phase=true)
 #     display(plot_wave(𝒫))
 #     display(plot_wave(𝒪))
 # end
-ptycho_reconstruction!(𝒪, ℴ, 𝒫, 𝒜, 3)
+
+# ptycho_reconstruction!(𝒪, ℴ, 𝒫, 𝒜, 3)
 
 # nᵢ = 10
 # for _ in 1:nᵢ
@@ -370,7 +372,7 @@ ptycho_reconstruction!(𝒪, ℴ, 𝒫, 𝒜, 3)
 #     display(plot_wave(𝒫))
 #     display(plot_wave(𝒪))
 # end
-ptycho_reconstruction!(𝒪, ℴ, 𝒫, 𝒜, 10; ngpu=4, plotting=false)
+# ptycho_reconstruction!(𝒪, ℴ, 𝒫, 𝒜, 10; ngpu=4, plotting=false)
 
 
 
