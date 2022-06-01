@@ -3,6 +3,22 @@ uuid = "035d3dd0-1203-4f60-83b7-4f66b8f1f3f7"
 authors = ["Chen Huang"]
 version = "0.1.0"
 
+[deps]
+AxisArrays = "39de3d68-74b9-583c-8d2d-e117c070f3a9"
+BenchmarkTools = "6e4b80f9-dd63-53aa-95a3-0cdb28fa8baf"
+CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
+Configurations = "5218b696-f38b-4ac9-8b61-a12ec717816d"
+DSP = "717857b8-e6f2-59f4-9121-6e50c889abd2"
+FFTW = "7a1cc6ca-52ef-59f5-83cd-3a7055c09341"
+Images = "916415d5-f1e6-5110-898d-aaa5f9f070e0"
+IterTools = "c8e1da08-722c-5040-9ed9-7db0dc04731e"
+MAT = "23992714-dd62-5051-b70f-ba57cb901cac"
+Plots = "91a5bcdd-55d7-5caf-9e0b-520d859cae80"
+Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
+Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
+ThreadsX = "ac1d9e8a-700a-412c-b207-f0111f4b6c0d"
+Unitful = "1986cc42-f94f-5a68-af5c-568840ba703d"
+
 [compat]
 julia = "1.7"
 
