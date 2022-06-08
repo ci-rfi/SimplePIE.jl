@@ -17,8 +17,7 @@ using ThreadsX
 using CUDA
 using BenchmarkTools
 using HDF5
-
-using Dates
+using Medipix
 
 export wavelength
 export circular_aperture
@@ -33,87 +32,6 @@ export plot_wave
 export ptycho_reconstruction!
 export plot_amplitude
 export plot_phase
-
-export load_mib
-
-abstract type AbstractMIBHeader end
-
-struct MIBHeader <: AbstractMIBHeader
-    id::Int
-    offset::Int
-    nchip::Int
-    dims::Vector{Int}
-    data_type::DataType
-    chip_dims::Vector{Int}
-    time::DateTime
-    exposure_s::Float64
-    image_bit_depth::Int
-    raw::Bool
-end
-
-function load_mib(filepath::AbstractString; kwargs...)
-    first_header = firstheader(filepath)
-    images, headers = read_mib(filepath, first_header; kwargs...)
-    return images, headers
-end
-
-function read_mib(filepath::AbstractString, first_header::AbstractMIBHeader; range=[1,typemax(Int)])
-    offset = first_header.offset
-    type = first_header.data_type
-    dims = first_header.dims
-    raw = first_header.raw
-    image_bit_depth = first_header.image_bit_depth
-
-    fid = open(filepath, "r")
-    headers = Vector{MIBHeader}()
-    if raw
-        depth_dict = Dict(1 => UInt8, 6 => UInt8, 12 => UInt16,
-                          24 => UInt32, 48 => UInt64)
-        type = depth_dict[image_bit_depth]
-    end
-        buffer = Array{type}(undef, dims[1], dims[2])
-        images = Vector{Array{type, 2}}()
-
-    n = 0
-    while eof(fid) == false && n < range[2]
-            header_string = read(fid, offset)
-            read!(fid, buffer)
-            n += 1
-            if n >= range[1]
-                push!(headers, make_mibheader(String(header_string); id=n))
-                push!(images, hton.(buffer))
-            end
-    end
-    close(fid)
-    return images, headers
-end
-
-function firstheader(filepath)
-    fid = open(filepath)
-    trial = split(String(read(fid, 768)), ",")
-    offset = parse(Int, trial[3])
-    seekstart(fid)
-    header_string = String(read(fid, offset))
-    close(fid)
-    first_header = make_mibheader(header_string; id=1)
-    return first_header
-end
-
-function make_mibheader(header_string::AbstractString; id=0)
-    header = split(header_string, ",")
-    offset = parse(Int, header[3])
-    nchip = parse(Int, header[4])
-    dims = parse.(Int, header[5:6])
-    type_dict = Dict("U1" => UInt8, "U8" => UInt8, "U08" => UInt8, "U16" => UInt16,
-                     "U32" => UInt32, "U64" => UInt64, "R64" => UInt64)
-    data_type = type_dict[header[7]]
-    chip_dims = parse.(Int, split(lstrip(header[8]), "x"))
-    time = DateTime(header[10][1:end-3], "y-m-d H:M:S.s")
-    exposure_s = parse(Float64, header[11])
-    image_bit_depth = parse(Int, header[end-1])
-    raw = header[7] == "R64"
-    return MIBHeader(id, offset, nchip, dims, data_type, chip_dims, time, exposure_s, image_bit_depth, raw)
-end
 
 function wavelength(V)::typeof(1.0u"nm")
     e  = 1.60217663e-19u"C" 
@@ -148,6 +66,14 @@ function define_probe_positions(dₛ, θᵣ, n₁, n₂; offset=[zero(dₛ), zer
 end
 define_probe_positions(dₛ, θᵣ, n; kwargs...) = define_probe_positions(dₛ, θᵣ, n, n; kwargs...)
 
+@option struct ObjectParams
+    step_size::typeof(1.0Å)
+    rotation_angle::typeof(1.0°)
+    scan_array_size::Int
+    detector_array_size::Int
+    real_space_sampling::typeof(1.0Å)
+end
+
 function make_object(positions, N, Δx, Δy; data_type=ComplexF32)
     min_x = minimum(first, positions)
     min_y = minimum(last, positions)
@@ -175,9 +101,19 @@ function make_object(positions, N, Δx, Δy; data_type=ComplexF32)
     end
     return 𝒪, ℴ
 end
-make_object(positions, N, Δx; kwargs...) = make_object(positions, N, Δx, Δx; kwargs...)
+make_object(positions, N, Δx; data_type=ComplexF32) = make_object(positions, N, Δx, Δx; data_type=data_type)
+make_object(op::ObjectParams; data_type=ComplexF32, kwargs...) = make_object(define_probe_positions(op.step_size, op.rotation_angle, op.scan_array_size; kwargs...), op.detector_array_size, op.real_space_sampling; data_type=data_type)
 
-function make_probe(α, N, Δf, Δk, Δx; data_type=ComplexF32, mean_amplitude_sum=1)
+@option struct ProbeParams
+    convergence_semi_angle::typeof(1.0mrad)
+    detector_array_size::Int
+    defocus::typeof(1.0μm)
+    fourier_space_sampling::typeof(1.0mrad)
+    real_space_sampling::typeof(1.0Å)
+    wavelength::typeof(1.0nm) 
+end
+
+function make_probe(α, N, Δf, Δk, Δx, λ; data_type=ComplexF32, mean_amplitude_sum=1)
     K = [Δk * [i,j] for (i,j) in product(-N/2:N/2-1, -N/2:N/2-1)]
     ω = map(x -> x[1] + x[2]im, K)
     ωᵢ = map(x -> x[1] - x[2]im, K)
@@ -194,6 +130,7 @@ function make_probe(α, N, Δf, Δk, Δx; data_type=ComplexF32, mean_amplitude_s
     𝒫 = AxisArray(𝒫_array; x = (𝒫_min_x:Δx:𝒫_max_x), y = (𝒫_min_x:Δx:𝒫_max_x))
     return 𝒫
 end
+make_probe(pp::ProbeParams; kwargs...) = make_probe(pp.convergence_semi_angle, pp.detector_array_size, pp.defocus, pp.fourier_space_sampling, pp.real_space_sampling, pp.wavelength; kwargs...)
 
 function load_dps(filename, n₁, n₂)
     dps_mat = matread(filename)["dps"];
@@ -269,14 +206,18 @@ end
 function ptycho_reconstruction!(𝒪, ℴ, 𝒫, 𝒜, nᵢ; method="ePIE", α=Float32(0.01), β=Float32(0.01), ngpu::Integer=0, plotting=false)
     for _ in 1:nᵢ
         if ngpu == 0
-            @time Threads.@threads for (i,j) in shuffle(collect(product(1:n, 1:n)))
-                ptycho_iteration!(ℴ[i,j], 𝒫, 𝒜[i,j]; method=method, α=α, β=β)
+            # @time Threads.@threads for (i,j) in shuffle(collect(product(1:n, 1:n)))
+            @time Threads.@threads for i in shuffle(eachindex(𝒜))
+            # @time Threads.@threads for (i,j) in collect(product(1:n, 1:n))
+                ptycho_iteration!(ℴ[i], 𝒫, 𝒜[i]; method=method, α=α, β=β)
             end
         else 
             ngpu = min(ngpu, CUDA.ndevices())
-            @time Threads.@threads for (i,j) in shuffle(collect(product(1:n, 1:n)))
-                CUDA.device!((i*n + j) % ngpu)
-                gpu_ptycho_iteration!(ℴ[i,j], 𝒫, 𝒜[i,j]; method=method, α=α, β=β)
+            # @time Threads.@threads for (i,j) in shuffle(collect(product(1:n, 1:n)))
+            @time Threads.@threads for i in shuffle(eachindex(𝒜))
+            # @time Threads.@threads for (i,j) in collect(product(1:n, 1:n))
+                CUDA.device!(i % ngpu)
+                gpu_ptycho_iteration!(ℴ[i], 𝒫, 𝒜[i]; method=method, α=α, β=β)
             end
         end
 
@@ -289,11 +230,12 @@ function ptycho_reconstruction!(𝒪, ℴ, 𝒫, 𝒜, nᵢ; method="ePIE", α=F
 end
 
 # output_file = "/home/chen/Data/ssd/2022-05-27/20220526_195851/rotation_search_1to360.h5"
-function rotation_sweep(output_file, 𝒜, dₛ, n, N, Δx, α, Δf, Δk, mean_amplitude_sum; nᵢ=1, ngpu=4, sweep_range=1°:1°:360°, offset=[zero(dₛ), zero(dₛ)])
+# TODO: Add parallel loading 
+function rotation_sweep(output_file, 𝒜, dₛ, n, N, Δx, α, Δf, Δk, λ, mean_amplitude_sum; nᵢ=1, ngpu=4, sweep_range=1°:1°:360°, offset=[zero(dₛ), zero(dₛ)])
     for θᵣ = sweep_range
         positions = define_probe_positions(dₛ, θᵣ, n; offset=[offset, offset])
         𝒪, ℴ = make_object(positions, N, Δx) 
-        𝒫 = make_probe(α, N, Δf, Δk, Δx; mean_amplitude_sum=mean_amplitude_sum)
+        𝒫 = make_probe(α, N, Δf, Δk, Δx, λ; mean_amplitude_sum=mean_amplitude_sum)
         # ptycho_iteration_gpu(ℴ, 𝒫, 𝒜; nᵢ=nᵢ)
         ptycho_reconstruction!(𝒪, ℴ, 𝒫, 𝒜, nᵢ; ngpu=ngpu, plotting=false)
         h5write(output_file, "/object" * string(lpad(ustrip(θᵣ),3,"0")), convert(Matrix{ComplexF32}, 𝒪))
@@ -304,6 +246,14 @@ function rotation_sweep(output_file, 𝒜, dₛ, n, N, Δx, α, Δf, Δk, mean_a
         [maximum(angle.(oo)), minimum(angle.(oo))]
         end
     findmax(first.(phase_max_min) - last.(phase_max_min))
+end
+
+function stepsize_sweep()
+    
+end
+
+function defocus_sweep()
+    
 end
 
 @option struct PtychoParams
@@ -320,7 +270,7 @@ end
 
     detector_array_size::Int
     scan_array_size::Int
-    wave_legnth::typeof(1.0nm) 
+    wavelength::typeof(1.0nm) 
     convergence_semi_angle::typeof(1.0mrad)
     fourier_space_sampling::typeof(1.0mrad)
     maximum_angle::typeof(1.0mrad)
