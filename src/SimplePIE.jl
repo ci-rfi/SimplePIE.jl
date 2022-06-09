@@ -33,6 +33,9 @@ export plot_wave
 export ptycho_reconstruction!
 export plot_amplitude
 export plot_phase
+export save_object
+export save_probe
+export save_result
 
 function wavelength(V)::typeof(1.0u"nm")
     e  = 1.60217663e-19u"C" 
@@ -232,6 +235,19 @@ function ptycho_reconstruction!(𝒪, ℴ, 𝒫, 𝒜, nᵢ; method="ePIE", α=F
         end
     end
     return nothing
+end
+
+function save_object(filename, 𝒪; object_name="", data_type=ComplexF32)
+    h5write(filename, "/object" * object_name, convert(Matrix{data_type}, 𝒪))
+end
+
+function save_probe(filename, 𝒫; probe_name="", data_type=ComplexF32)
+    h5write(filename, "/probe" * probe_name, convert(Matrix{data_type}, 𝒫))
+end
+
+function save_result(filename, 𝒪, 𝒫; object_name="", probe_name="", data_type=ComplexF32)
+    save_object(filename, 𝒪; object_name=object_name, data_type=data_type)
+    save_probe(filename, 𝒫; probe_name=probe_name, data_type=data_type)
 end
 
 # output_file = "/home/chen/Data/ssd/2022-05-27/20220526_195851/rotation_search_1to360.h5"
