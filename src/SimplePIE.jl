@@ -23,9 +23,10 @@ export wavelength
 export circular_aperture
 export define_probe_positions
 export make_object
+export sum_sqrt_mean
 export make_probe
 export load_dps
-# export update!
+export make_amplitude
 export ptycho_iteration!
 export gpu_ptycho_iteration!
 export plot_wave
@@ -104,6 +105,10 @@ end
 make_object(positions, N, Δx; data_type=ComplexF32) = make_object(positions, N, Δx, Δx; data_type=data_type)
 make_object(op::ObjectParams; data_type=ComplexF32, kwargs...) = make_object(define_probe_positions(op.step_size, op.rotation_angle, op.scan_array_size; kwargs...), op.detector_array_size, op.real_space_sampling; data_type=data_type)
 
+function sum_sqrt_mean(dps)
+    sum(sqrt.(mean(dps))) 
+end
+
 @option struct ProbeParams
     convergence_semi_angle::typeof(1.0mrad)
     detector_array_size::Int
@@ -138,6 +143,10 @@ function load_dps(filename, n₁, n₂)
     return dps
 end
 load_dps(filename, n) = load_dps(filename, n, n)
+
+function make_amplitude(dps; data_type=Float32) 
+    ThreadsX.map(x -> fftshift(sqrt.(x))|> Matrix{data_type}, dps)
+end
 
 function update!(q, a, Δψ; method="ePIE", α=0.2) 
     a̅ = conj(a)
@@ -194,12 +203,8 @@ function plot_phase(𝒲; unwrap_phase=false)
 end
 
 function plot_wave(𝒲; unwrap_phase=false)
-    # amplitude = abs.(𝒲)
-    # phase = unwrap_phase ? unwrap(angle.(𝒲); dims=1:2) : angle.(𝒲)
-    # p1 = heatmap(amplitude, aspect_ratio=1)
-    # p2 = heatmap(phase, aspect_ratio=1)
     p1 = plot_amplitude(𝒲)
-    p2 = plot_phase(𝒲; unwrap_phase=false)
+    p2 = plot_phase(𝒲; unwrap_phase=unwrap_phase)
     return plot(p1, p2, layout=(1,2))
 end
 
