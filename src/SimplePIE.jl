@@ -1,7 +1,6 @@
 module SimplePIE
 
 using Configurations
-
 using Unitful
 using Unitful: Å, nm, μm, °, kV, mrad
 using MAT
@@ -18,6 +17,10 @@ using CUDA
 using BenchmarkTools
 using HDF5
 using Medipix
+
+export PtychoParams
+export ObjectParams
+export ProbeParams
 
 export wavelength
 export circular_aperture
@@ -36,6 +39,36 @@ export plot_phase
 export save_object
 export save_probe
 export save_result
+
+@option struct PtychoParams
+    detector_array_size::Int
+    scan_array_size::Int
+    wavelength::typeof(1.0nm) 
+    convergence_semi_angle::typeof(1.0mrad)
+    fourier_space_sampling::typeof(1.0mrad)
+    maximum_angle::typeof(1.0mrad)
+    rotation_angle::typeof(1.0°)
+    step_size::typeof(1.0Å)
+    real_space_sampling::typeof(1.0Å)
+    defocus::typeof(1.0μm)
+end
+
+@option struct ObjectParams
+    step_size::typeof(1.0Å)
+    rotation_angle::typeof(1.0°)
+    scan_array_size::Int
+    detector_array_size::Int
+    real_space_sampling::typeof(1.0Å)
+end
+
+@option struct ProbeParams
+    convergence_semi_angle::typeof(1.0mrad)
+    detector_array_size::Int
+    defocus::typeof(1.0μm)
+    fourier_space_sampling::typeof(1.0mrad)
+    real_space_sampling::typeof(1.0Å)
+    wavelength::typeof(1.0nm) 
+end
 
 function wavelength(V)::typeof(1.0u"nm")
     e  = 1.60217663e-19u"C" 
@@ -70,14 +103,6 @@ function define_probe_positions(dₛ, θᵣ, n₁, n₂; offset=[zero(dₛ), zer
 end
 define_probe_positions(dₛ, θᵣ, n; kwargs...) = define_probe_positions(dₛ, θᵣ, n, n; kwargs...)
 
-@option struct ObjectParams
-    step_size::typeof(1.0Å)
-    rotation_angle::typeof(1.0°)
-    scan_array_size::Int
-    detector_array_size::Int
-    real_space_sampling::typeof(1.0Å)
-end
-
 function make_object(positions, N, Δx, Δy; data_type=ComplexF32)
     min_x = minimum(first, positions)
     min_y = minimum(last, positions)
@@ -110,15 +135,6 @@ make_object(op::ObjectParams; data_type=ComplexF32, kwargs...) = make_object(def
 
 function sum_sqrt_mean(dps)
     sum(sqrt.(mean(dps))) 
-end
-
-@option struct ProbeParams
-    convergence_semi_angle::typeof(1.0mrad)
-    detector_array_size::Int
-    defocus::typeof(1.0μm)
-    fourier_space_sampling::typeof(1.0mrad)
-    real_space_sampling::typeof(1.0Å)
-    wavelength::typeof(1.0nm) 
 end
 
 function make_probe(α, N, Δf, Δk, Δx, λ; data_type=ComplexF32, mean_amplitude_sum=1)
@@ -214,16 +230,12 @@ end
 function ptycho_reconstruction!(𝒪, ℴ, 𝒫, 𝒜, nᵢ; method="ePIE", α=Float32(0.01), β=Float32(0.01), ngpu::Integer=0, plotting=false)
     for _ in 1:nᵢ
         if ngpu == 0
-            # @time Threads.@threads for (i,j) in shuffle(collect(product(1:n, 1:n)))
             @time Threads.@threads for i in shuffle(eachindex(𝒜))
-            # @time Threads.@threads for (i,j) in collect(product(1:n, 1:n))
                 ptycho_iteration!(ℴ[i], 𝒫, 𝒜[i]; method=method, α=α, β=β)
             end
         else 
             ngpu = min(ngpu, CUDA.ndevices())
-            # @time Threads.@threads for (i,j) in shuffle(collect(product(1:n, 1:n)))
             @time Threads.@threads for i in shuffle(eachindex(𝒜))
-            # @time Threads.@threads for (i,j) in collect(product(1:n, 1:n))
                 CUDA.device!(i % ngpu)
                 gpu_ptycho_iteration!(ℴ[i], 𝒫, 𝒜[i]; method=method, α=α, β=β)
             end
@@ -257,7 +269,6 @@ function rotation_sweep(output_file, 𝒜, dₛ, n, N, Δx, α, Δf, Δk, λ, me
         positions = define_probe_positions(dₛ, θᵣ, n; offset=[offset, offset])
         𝒪, ℴ = make_object(positions, N, Δx) 
         𝒫 = make_probe(α, N, Δf, Δk, Δx, λ; mean_amplitude_sum=mean_amplitude_sum)
-        # ptycho_iteration_gpu(ℴ, 𝒫, 𝒜; nᵢ=nᵢ)
         ptycho_reconstruction!(𝒪, ℴ, 𝒫, 𝒜, nᵢ; ngpu=ngpu, plotting=false)
         h5write(output_file, "/object" * string(lpad(ustrip(θᵣ),3,"0")), convert(Matrix{ComplexF32}, 𝒪))
         h5write(output_file, "/probe" * string(lpad(ustrip(θᵣ),3,"0")), convert(Matrix{ComplexF32}, 𝒫))
@@ -275,30 +286,6 @@ end
 
 function defocus_sweep()
     
-end
-
-@option struct PtychoParams
-    # N::Int
-    # n::Int
-    # λ::typeof(1.0nm) 
-    # α::typeof(1.0mrad)
-    # Δk::typeof(1.0mrad)
-    # θ::typeof(1.0mrad)
-    # θᵣ::typeof(1.0°)
-    # dₛ::typeof(1.0Å)
-    # Δx = uconvert(Å, λ/θ)
-    # Δf::typeof(1.0μm)
-
-    detector_array_size::Int
-    scan_array_size::Int
-    wavelength::typeof(1.0nm) 
-    convergence_semi_angle::typeof(1.0mrad)
-    fourier_space_sampling::typeof(1.0mrad)
-    maximum_angle::typeof(1.0mrad)
-    rotation_angle::typeof(1.0°)
-    step_size::typeof(1.0Å)
-    real_space_sampling::typeof(1.0Å)
-    defocus::typeof(1.0μm)
 end
 
 end
