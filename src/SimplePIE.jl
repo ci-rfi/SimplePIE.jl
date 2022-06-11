@@ -1,6 +1,7 @@
 module SimplePIE
 
 using Configurations
+using TOML
 using Unitful
 using Unitful: Å, nm, μm, °, kV, mrad
 using MAT
@@ -16,11 +17,15 @@ using ThreadsX
 using CUDA
 using BenchmarkTools
 using HDF5
-using Medipix
+# using Medipix
+
+import Configurations.from_dict
+import Configurations.to_dict
 
 export PtychoParams
 export ObjectParams
 export ProbeParams
+export params_from_toml
 
 export wavelength
 export circular_aperture
@@ -60,6 +65,7 @@ end
     detector_array_size::Int
     real_space_sampling::typeof(1.0Å)
 end
+ObjectParams(p::PtychoParams) = ObjectParams(p.step_size, p.rotation_angle, p.scan_array_size, p.detector_array_size, p.real_space_sampling)
 
 @option struct ProbeParams
     convergence_semi_angle::typeof(1.0mrad)
@@ -68,6 +74,19 @@ end
     fourier_space_sampling::typeof(1.0mrad)
     real_space_sampling::typeof(1.0Å)
     wavelength::typeof(1.0nm) 
+end
+ProbeParams(p::PtychoParams) = ProbeParams(p.convergence_semi_angle, p.detector_array_size, p.defocus, p.fourier_space_sampling, p.real_space_sampling, p.wavelength)
+
+function unitAsString(unitOfQuantity::Unitful.FreeUnits) 
+    replace(repr(unitOfQuantity,context = Pair(:fancy_exponent,false)), " " => "*")
+end
+
+OT = Union{PtychoParams, ObjectParams, ProbeParams}
+Configurations.from_dict(::Type{T} where T<:OT, ::Type{T} where T<:Unitful.Quantity, x) = x[1] * uparse(x[2])
+Configurations.to_dict(::Type{T} where T<:OT, x::T where T<:Unitful.Quantity) = [ustrip(x), unitAsString(unit(x))]
+
+function params_from_toml(::Type{T}, toml_file::String) where T<:OT
+    from_dict(T, TOML.parsefile(toml_file))
 end
 
 function wavelength(V)::typeof(1.0u"nm")
@@ -251,15 +270,18 @@ end
 
 function save_object(filename, 𝒪; object_name="", data_type=ComplexF32)
     h5write(filename, "/object" * object_name, convert(Matrix{data_type}, 𝒪))
+    h5write(filename, "/object" * object_name * "_params", to_toml(object_params))
 end
 
 function save_probe(filename, 𝒫; probe_name="", data_type=ComplexF32)
     h5write(filename, "/probe" * probe_name, convert(Matrix{data_type}, 𝒫))
+    h5write(filename, "/probe" * probe_name * "_params", to_toml(probe_params))
 end
 
 function save_result(filename, 𝒪, 𝒫; object_name="", probe_name="", data_type=ComplexF32)
     save_object(filename, 𝒪; object_name=object_name, data_type=data_type)
     save_probe(filename, 𝒫; probe_name=probe_name, data_type=data_type)
+    h5write(filename, "/ptycho" * object_name * "_params", to_toml(ptycho_params))
 end
 
 # output_file = "/home/chen/Data/ssd/2022-05-27/20220526_195851/rotation_search_1to360.h5"
