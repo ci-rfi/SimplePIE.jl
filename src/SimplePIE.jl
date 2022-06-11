@@ -46,34 +46,34 @@ export save_probe
 export save_result
 
 @option struct PtychoParams
-    detector_array_size::Int
-    scan_array_size::Int
-    wavelength::typeof(1.0nm) 
-    convergence_semi_angle::typeof(1.0mrad)
-    fourier_space_sampling::typeof(1.0mrad)
-    maximum_angle::typeof(1.0mrad)
-    rotation_angle::typeof(1.0°)
-    step_size::typeof(1.0Å)
-    real_space_sampling::typeof(1.0Å)
-    defocus::typeof(1.0μm)
+    detector_array_size::Int = 0
+    scan_array_size::Int = 0
+    wavelength::typeof(1.0nm) = 0.0nm
+    convergence_semi_angle::typeof(1.0mrad) = 0.0mrad
+    fourier_space_sampling::typeof(1.0mrad) = 0.0mrad
+    maximum_angle::typeof(1.0mrad) = 0.0mrad
+    rotation_angle::typeof(1.0°) = 0.0°
+    step_size::typeof(1.0Å) = 0.0Å
+    real_space_sampling::typeof(1.0Å) = 0.0Å
+    defocus::typeof(1.0μm) = 0.0μm
 end
 
 @option struct ObjectParams
-    step_size::typeof(1.0Å)
-    rotation_angle::typeof(1.0°)
-    scan_array_size::Int
-    detector_array_size::Int
-    real_space_sampling::typeof(1.0Å)
+    step_size::typeof(1.0Å) = 0.0Å
+    rotation_angle::typeof(1.0°) = 0.0°
+    scan_array_size::Int = 0
+    detector_array_size::Int = 0
+    real_space_sampling::typeof(1.0Å) = 0.0Å
 end
 ObjectParams(p::PtychoParams) = ObjectParams(p.step_size, p.rotation_angle, p.scan_array_size, p.detector_array_size, p.real_space_sampling)
 
 @option struct ProbeParams
-    convergence_semi_angle::typeof(1.0mrad)
-    detector_array_size::Int
-    defocus::typeof(1.0μm)
-    fourier_space_sampling::typeof(1.0mrad)
-    real_space_sampling::typeof(1.0Å)
-    wavelength::typeof(1.0nm) 
+    convergence_semi_angle::typeof(1.0mrad) = 0.0mrad
+    detector_array_size::Int = 0
+    defocus::typeof(1.0μm) = 0.0μm
+    fourier_space_sampling::typeof(1.0mrad) = 0.0mrad
+    real_space_sampling::typeof(1.0Å) = 0.0Å
+    wavelength::typeof(1.0nm) = 0.0nm
 end
 ProbeParams(p::PtychoParams) = ProbeParams(p.convergence_semi_angle, p.detector_array_size, p.defocus, p.fourier_space_sampling, p.real_space_sampling, p.wavelength)
 
@@ -267,20 +267,21 @@ function ptycho_reconstruction!(𝒪, ℴ, 𝒫, 𝒜, nᵢ; method="ePIE", α=F
     end
     return nothing
 end
+ptycho_reconstruction!(𝒪, ℴ, 𝒫, 𝒜; kwargs...) = ptycho_reconstruction!(𝒪, ℴ, 𝒫, 𝒜, 1; kwargs...)
 
-function save_object(filename, 𝒪; object_name="", data_type=ComplexF32)
+function save_object(filename, 𝒪; object_name="", object_params=ObjectParams(), data_type=ComplexF32)
     h5write(filename, "/object" * object_name, convert(Matrix{data_type}, 𝒪))
     h5write(filename, "/object" * object_name * "_params", to_toml(object_params))
 end
 
-function save_probe(filename, 𝒫; probe_name="", data_type=ComplexF32)
+function save_probe(filename, 𝒫; probe_name="", probe_params=ProbeParams(), data_type=ComplexF32)
     h5write(filename, "/probe" * probe_name, convert(Matrix{data_type}, 𝒫))
     h5write(filename, "/probe" * probe_name * "_params", to_toml(probe_params))
 end
 
-function save_result(filename, 𝒪, 𝒫; object_name="", probe_name="", data_type=ComplexF32)
-    save_object(filename, 𝒪; object_name=object_name, data_type=data_type)
-    save_probe(filename, 𝒫; probe_name=probe_name, data_type=data_type)
+function save_result(filename, 𝒪, 𝒫; object_name="", probe_name="", object_params=ObjectParams(), probe_params=ProbeParams(), ptycho_params=PtychoParams(), data_type=ComplexF32)
+    save_object(filename, 𝒪; object_name=object_name, object_params=object_params, data_type=data_type)
+    save_probe(filename, 𝒫; probe_name=probe_name, probe_params=probe_params, data_type=data_type)
     h5write(filename, "/ptycho" * object_name * "_params", to_toml(ptycho_params))
 end
 
