@@ -268,16 +268,16 @@ function plot_wave(𝒲; unwrap_phase=false)
     return plot(p1, p2, layout=(1,2))
 end
 
-function ptycho_reconstruction!(𝒪, ℴ, 𝒫, 𝒜, nᵢ; method="ePIE", α=Float32(0.01), β=Float32(0.01), ngpu::Integer=0, plotting=false)
+function ptycho_reconstruction!(𝒪, ℴ, 𝒫, 𝒜, nᵢ; method="ePIE", α=Float32(0.01), β=Float32(0.01), GPUs::Vector{Int}=Int[], plotting=false)
+    ngpu = length(GPUs)
     for _ in 1:nᵢ
         if ngpu == 0
             @time Threads.@threads for i in shuffle(eachindex(𝒜))
                 ptycho_iteration!(ℴ[i], 𝒫, 𝒜[i]; method=method, α=α, β=β)
             end
         else 
-            ngpu = min(ngpu, CUDA.ndevices())
             @time Threads.@threads for i in shuffle(eachindex(𝒜))
-                CUDA.device!(i % ngpu)
+                CUDA.device!(GPUs[i % ngpu + 1])
                 gpu_ptycho_iteration!(ℴ[i], 𝒫, 𝒜[i]; method=method, α=α, β=β)
             end
         end
@@ -316,22 +316,49 @@ function save_result(filename, 𝒪, 𝒫; object_name="", probe_name="", object
 end
 save_result(𝒪, 𝒫, ip::IterParams; kwargs...) = save_result(ip.filename, 𝒪, 𝒫; object_name=ip.object_name, probe_name=ip.probe_name, kwargs...)
 
+
+function crop_center(im, w::Integer, h::Integer)
+    m, n = size(im)
+    l = floor((m/2 - w/2 + 1)) |> Int
+    r = floor((m/2 + w/2)) |> Int
+    b = floor((n/2 - h/2 + 1)) |> Int
+    t = floor((n/2 + h/2)) |> Int
+    im_out = im[l:r, b:t]
+    return im_out
+end
+crop_center(im, l) = crop_center(im, l, l)
 # output_file = "/home/chen/Data/ssd/2022-05-27/20220526_195851/rotation_search_1to360.h5"
 # TODO: Add parallel loading 
-function rotation_sweep(output_file, 𝒜, dₛ, n, N, Δx, α, Δf, Δk, λ, mean_amplitude_sum; nᵢ=1, ngpu=4, sweep_range=1°:1°:360°, offset=[zero(dₛ), zero(dₛ)])
-    for θᵣ = sweep_range
-        positions = define_probe_positions(dₛ, θᵣ, n; offset=[offset, offset])
-        𝒪, ℴ = make_object(positions, N, Δx) 
-        𝒫 = make_probe(α, N, Δf, Δk, Δx, λ; mean_amplitude_sum=mean_amplitude_sum)
-        ptycho_reconstruction!(𝒪, ℴ, 𝒫, 𝒜, nᵢ; ngpu=ngpu, plotting=false)
-        h5write(output_file, "/object" * string(lpad(ustrip(θᵣ),3,"0")), convert(Matrix{ComplexF32}, 𝒪))
-        h5write(output_file, "/probe" * string(lpad(ustrip(θᵣ),3,"0")), convert(Matrix{ComplexF32}, 𝒫))
+function rotation_angle_sweep(𝒜, p::PtychoParams, ip::IterParams; angle_range=1°:1°:360°)
+    object_size = (1, 1)
+    selection_aperture = circular_aperture(10, 1)
+    let p = p
+        p.rotation_angle = 0°
+        𝒪, ℴ = make_object(p)
+        object_size = min(size(𝒪)...)
+        selection_aperture = circular_aperture(object_size, object_size / 2 - 1)
     end
-    phase_max_min = map(1:360) do i 
-        oo = h5read(output_file, "/object" * string(lpad(i,3,"0")))
-        [maximum(angle.(oo)), minimum(angle.(oo))]
+    sweep_result = map(angle_range) do θᵣ
+        p.rotation_angle = θᵣ
+        ip.object_name = string(lpad(ustrip(θᵣ),3,"0"))
+        ip.probe_name = string(lpad(ustrip(θᵣ),3,"0"))
+
+        𝒪, ℴ = make_object(p)
+        𝒫 = make_probe(p)
+        ptycho_reconstruction!(𝒪, ℴ, 𝒫, 𝒜, ip)
+
+        if ip.filename != ""
+            save_result(𝒪, 𝒫, ip; ptycho_params=p)
         end
-    findmax(first.(phase_max_min) - last.(phase_max_min))
+
+        return θᵣ, std(angle.(selection_aperture .* crop_center(𝒪, object_size)))
+    end
+
+    if ip.filename != ""
+        h5write(ip.filename, "/sweep_result/rotation", [ustrip(first.(sweep_result)) last.(sweep_result)])
+    end
+
+    return sweep_result
 end
 
 function stepsize_sweep()
