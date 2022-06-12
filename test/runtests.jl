@@ -16,14 +16,15 @@ using Test
     dₛ = 31.25Å
     Δx = uconvert(Å, λ/θ)
     Δf = -13μm
+    𝒜_sum = 47317.77435855447
 
-    ptycho_params = PtychoParams(N, n, λ, α, Δk, θ, θᵣ, dₛ, Δx, Δf)
+    ptycho_params = PtychoParams(N, n, λ, α, Δk, θ, θᵣ, dₛ, Δx, Δf, 𝒜_sum) 
     object_params = ObjectParams(dₛ, θᵣ, n, N, Δx)
-    probe_params = ProbeParams(α, N, Δf, Δk, Δx, λ)
+    probe_params = ProbeParams(α, N, Δf, Δk, Δx, λ, 𝒜_sum) 
 
-    ptycho_params_from_toml = params_from_toml(PtychoParams, "ptycho_params.toml")
-    object_params_from_toml = params_from_toml(ObjectParams, "object_params.toml")
-    probe_params_from_toml = params_from_toml(ProbeParams, "probe_params.toml")
+    ptycho_params_from_toml = from_toml(PtychoParams, "ptycho_params.toml")
+    object_params_from_toml = from_toml(ObjectParams, "object_params.toml")
+    probe_params_from_toml = from_toml(ProbeParams, "probe_params.toml")
 
     @test object_params == object_params_from_toml
     @test probe_params == probe_params_from_toml

@@ -25,7 +25,8 @@ import Configurations.to_dict
 export PtychoParams
 export ObjectParams
 export ProbeParams
-export params_from_toml
+export IterParams
+export from_toml
 
 export wavelength
 export circular_aperture
@@ -44,8 +45,9 @@ export plot_phase
 export save_object
 export save_probe
 export save_result
+export rotation_sweep
 
-@option struct PtychoParams
+@option mutable struct PtychoParams
     detector_array_size::Int = 0
     scan_array_size::Int = 0
     wavelength::typeof(1.0nm) = 0.0nm
@@ -56,9 +58,10 @@ export save_result
     step_size::typeof(1.0Å) = 0.0Å
     real_space_sampling::typeof(1.0Å) = 0.0Å
     defocus::typeof(1.0μm) = 0.0μm
+    amplitude_sum::Float64 = 0
 end
 
-@option struct ObjectParams
+@option mutable struct ObjectParams
     step_size::typeof(1.0Å) = 0.0Å
     rotation_angle::typeof(1.0°) = 0.0°
     scan_array_size::Int = 0
@@ -67,15 +70,31 @@ end
 end
 ObjectParams(p::PtychoParams) = ObjectParams(p.step_size, p.rotation_angle, p.scan_array_size, p.detector_array_size, p.real_space_sampling)
 
-@option struct ProbeParams
+@option mutable struct ProbeParams
     convergence_semi_angle::typeof(1.0mrad) = 0.0mrad
     detector_array_size::Int = 0
     defocus::typeof(1.0μm) = 0.0μm
     fourier_space_sampling::typeof(1.0mrad) = 0.0mrad
     real_space_sampling::typeof(1.0Å) = 0.0Å
     wavelength::typeof(1.0nm) = 0.0nm
+    amplitude_sum::Float64 = 0
 end
-ProbeParams(p::PtychoParams) = ProbeParams(p.convergence_semi_angle, p.detector_array_size, p.defocus, p.fourier_space_sampling, p.real_space_sampling, p.wavelength)
+ProbeParams(p::PtychoParams) = ProbeParams(p.convergence_semi_angle, p.detector_array_size, p.defocus, p.fourier_space_sampling, p.real_space_sampling, p.wavelength, p.amplitude_sum)
+
+@option mutable struct IterParams
+    iteration_start::Int = 1
+    iteration_end::Int = 1
+    method::String = "ePIE"
+    alpha::Float32 = 0.01
+    beta::Float32 = 0.01
+    GPUs::Vector{Int} = Int[]
+    plotting::Bool = false
+    shuffle::Bool = true
+    filename::String = ""
+    object_name::String = ""
+    probe_name::String = ""
+end
+IterParams(p::PtychoParams) = IterParams(p.iteration_start, p.iteration_end, p.alpha, p.beta, p.gpu, p.shuffle, p.filename, p.object_name, p.probe_name)
 
 function unitAsString(unitOfQuantity::Unitful.FreeUnits) 
     replace(repr(unitOfQuantity,context = Pair(:fancy_exponent,false)), " " => "*")
@@ -121,6 +140,7 @@ function define_probe_positions(dₛ, θᵣ, n₁, n₂; offset=[zero(dₛ), zer
     return positions 
 end
 define_probe_positions(dₛ, θᵣ, n; kwargs...) = define_probe_positions(dₛ, θᵣ, n, n; kwargs...)
+define_probe_positions(p::PtychoParams; kwargs...) = define_probe_positions(p.step_size, p.rotation_angle, p.scan_array_size; kwargs...)
 
 function make_object(positions, N, Δx, Δy; data_type=ComplexF32)
     min_x = minimum(first, positions)
@@ -151,12 +171,13 @@ function make_object(positions, N, Δx, Δy; data_type=ComplexF32)
 end
 make_object(positions, N, Δx; data_type=ComplexF32) = make_object(positions, N, Δx, Δx; data_type=data_type)
 make_object(op::ObjectParams; data_type=ComplexF32, kwargs...) = make_object(define_probe_positions(op.step_size, op.rotation_angle, op.scan_array_size; kwargs...), op.detector_array_size, op.real_space_sampling; data_type=data_type)
+make_object(p::PtychoParams; data_type=ComplexF32, kwargs...) = make_object(ObjectParams(p); data_type=data_type, kwargs...)
 
 function sum_sqrt_mean(dps)
     sum(sqrt.(mean(dps))) 
 end
 
-function make_probe(α, N, Δf, Δk, Δx, λ; data_type=ComplexF32, mean_amplitude_sum=1)
+function make_probe(α, N, Δf, Δk, Δx, λ, mean_amplitude_sum; data_type=ComplexF32)
     K = [Δk * [i,j] for (i,j) in product(-N/2:N/2-1, -N/2:N/2-1)]
     ω = map(x -> x[1] + x[2]im, K)
     ωᵢ = map(x -> x[1] - x[2]im, K)
@@ -173,7 +194,8 @@ function make_probe(α, N, Δf, Δk, Δx, λ; data_type=ComplexF32, mean_amplitu
     𝒫 = AxisArray(𝒫_array; x = (𝒫_min_x:Δx:𝒫_max_x), y = (𝒫_min_x:Δx:𝒫_max_x))
     return 𝒫
 end
-make_probe(pp::ProbeParams; kwargs...) = make_probe(pp.convergence_semi_angle, pp.detector_array_size, pp.defocus, pp.fourier_space_sampling, pp.real_space_sampling, pp.wavelength; kwargs...)
+make_probe(pp::ProbeParams; kwargs...) = make_probe(pp.convergence_semi_angle, pp.detector_array_size, pp.defocus, pp.fourier_space_sampling, pp.real_space_sampling, pp.wavelength, pp.amplitude_sum; kwargs...)
+make_probe(p::PtychoParams; kwargs...) = make_probe(ProbeParams(p); kwargs...)
 
 function load_dps(filename, n₁, n₂)
     dps_mat = matread(filename)["dps"];
@@ -269,21 +291,30 @@ function ptycho_reconstruction!(𝒪, ℴ, 𝒫, 𝒜, nᵢ; method="ePIE", α=F
 end
 ptycho_reconstruction!(𝒪, ℴ, 𝒫, 𝒜; kwargs...) = ptycho_reconstruction!(𝒪, ℴ, 𝒫, 𝒜, 1; kwargs...)
 
+function ptycho_reconstruction!(𝒪, ℴ, 𝒫, 𝒜, ip::IterParams)
+    nᵢ = length(range(ip.iteration_start, ip.iteration_end))
+    ptycho_reconstruction!(𝒪, ℴ, 𝒫, 𝒜, nᵢ; method=ip.method, α=ip.alpha, β=ip.beta, GPUs=ip.GPUs, plotting=ip.plotting)
+end
+
+
 function save_object(filename, 𝒪; object_name="", object_params=ObjectParams(), data_type=ComplexF32)
     h5write(filename, "/object" * object_name, convert(Matrix{data_type}, 𝒪))
     h5write(filename, "/object" * object_name * "_params", to_toml(object_params))
 end
+save_object(𝒪, ip::IterParams; kwargs...) = save_object(ip.filename; object_name=ip.object_name, kwargs...)
 
 function save_probe(filename, 𝒫; probe_name="", probe_params=ProbeParams(), data_type=ComplexF32)
     h5write(filename, "/probe" * probe_name, convert(Matrix{data_type}, 𝒫))
     h5write(filename, "/probe" * probe_name * "_params", to_toml(probe_params))
 end
+save_probe(𝒫, ip::IterParams; kwargs...) = save_probe(ip.filename; probe_name=ip.probe_name, kwargs...)
 
 function save_result(filename, 𝒪, 𝒫; object_name="", probe_name="", object_params=ObjectParams(), probe_params=ProbeParams(), ptycho_params=PtychoParams(), data_type=ComplexF32)
     save_object(filename, 𝒪; object_name=object_name, object_params=object_params, data_type=data_type)
     save_probe(filename, 𝒫; probe_name=probe_name, probe_params=probe_params, data_type=data_type)
     h5write(filename, "/ptycho" * object_name * "_params", to_toml(ptycho_params))
 end
+save_result(𝒪, 𝒫, ip::IterParams; kwargs...) = save_result(ip.filename, 𝒪, 𝒫; object_name=ip.object_name, probe_name=ip.probe_name, kwargs...)
 
 # output_file = "/home/chen/Data/ssd/2022-05-27/20220526_195851/rotation_search_1to360.h5"
 # TODO: Add parallel loading 
