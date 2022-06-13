@@ -17,7 +17,7 @@ using ThreadsX
 using CUDA
 using BenchmarkTools
 using HDF5
-# using Medipix
+using Medipix
 
 import Configurations.from_dict
 import Configurations.to_dict
@@ -35,6 +35,7 @@ export make_object
 export sum_sqrt_mean
 export make_probe
 export load_dps
+export load_mib
 export make_amplitude
 export ptycho_iteration!
 export gpu_ptycho_iteration!
@@ -45,7 +46,11 @@ export plot_phase
 export save_object
 export save_probe
 export save_result
-export rotation_sweep
+export crop_center
+export cbed_center
+export edge_distance
+export shift_cbed
+export align_cbeds
 
 @option mutable struct PtychoParams
     detector_array_size::Int = 0
@@ -316,7 +321,6 @@ function save_result(filename, 𝒪, 𝒫; object_name="", probe_name="", object
 end
 save_result(𝒪, 𝒫, ip::IterParams; kwargs...) = save_result(ip.filename, 𝒪, 𝒫; object_name=ip.object_name, probe_name=ip.probe_name, kwargs...)
 
-
 function crop_center(im, w::Integer, h::Integer)
     m, n = size(im)
     l = floor((m/2 - w/2 + 1)) |> Int
@@ -343,26 +347,39 @@ function rotation_angle_sweep(𝒜, p::PtychoParams, ip::IterParams; angle_range
         ip.object_name = string(lpad(ustrip(θᵣ),3,"0"))
         ip.probe_name = string(lpad(ustrip(θᵣ),3,"0"))
 
-        𝒪, ℴ = make_object(p)
-        𝒫 = make_probe(p)
-        ptycho_reconstruction!(𝒪, ℴ, 𝒫, 𝒜, ip)
+function cbed_center(cbed; threshold=0.1)
+    bw_cbed = cbed .> (maximum(cbed) * threshold)
+    cbed_indices = Tuple.(findall(x -> x==1, bw_cbed))
+    Int.(round.(mean.((first.(cbed_indices), last.(cbed_indices)))))
+end
 
-        if ip.filename != ""
-            save_result(𝒪, 𝒫, ip; ptycho_params=p)
-        end
+function edge_distance(cbed, center)
+    hcat(center .- (1, 1)...,  size(cbed) .- center...)
+end
 
-        return θᵣ, std(angle.(selection_aperture .* crop_center(𝒪, object_size)))
-    end
+function shift_cbed(cbed; v=cbed_center(cbed))
+    circshift(cbed, size(cbed)./2 .- v)
+end
 
-    if ip.filename != ""
-        h5write(ip.filename, "/sweep_result/rotation", [ustrip(first.(sweep_result)) last.(sweep_result)])
+function align_cbeds(cbeds; threshold=0.1, crop=true)
+    centers = ThreadsX.map(x -> cbed_center(x; threshold=threshold), cbeds)
+    if crop
+        all_distance = ThreadsX.map(edge_distance, cbeds, centers)
+        crop_diameter = minimum(minimum.(all_distance)) * 2
+        ThreadsX.map((x, y) -> crop_center(shift_cbed(x; v=y), crop_diameter), cbeds, centers)
+    else
+        ThreadsX.map((x, y) -> shift_cbed(x; v=y), cbeds, centers)
     end
 
     return sweep_result
 end
 
-function stepsize_sweep()
-    
+function load_mib(filename::String; threshold=0.1, align=false, quadrant=1)
+    data, _ = Medipix.load_mib(filename)
+    ranges = [[257:512, 257:512], [1:256, 257:512], [1:256, 1:256], [257:512, 1:256], [1:512, 1:512]]
+    quadrant_range = ranges[quadrant]
+    cbeds = map(x -> x[quadrant_range...], data)
+    return align ? align_cbeds(cbeds, threshold=threshold) : cbeds
 end
 
 function defocus_sweep()
