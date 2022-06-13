@@ -51,6 +51,9 @@ export cbed_center
 export edge_distance
 export shift_cbed
 export align_cbeds
+export rotation_angle_sweep
+export stepsize_sweep
+export defocus_sweep
 
 @option mutable struct PtychoParams
     detector_array_size::Int = 0
@@ -331,21 +334,6 @@ function crop_center(im, w::Integer, h::Integer)
     return im_out
 end
 crop_center(im, l) = crop_center(im, l, l)
-# output_file = "/home/chen/Data/ssd/2022-05-27/20220526_195851/rotation_search_1to360.h5"
-# TODO: Add parallel loading 
-function rotation_angle_sweep(𝒜, p::PtychoParams, ip::IterParams; angle_range=1°:1°:360°)
-    object_size = (1, 1)
-    selection_aperture = circular_aperture(10, 1)
-    let p = p
-        p.rotation_angle = 0°
-        𝒪, ℴ = make_object(p)
-        object_size = min(size(𝒪)...)
-        selection_aperture = circular_aperture(object_size, object_size / 2 - 1)
-    end
-    sweep_result = map(angle_range) do θᵣ
-        p.rotation_angle = θᵣ
-        ip.object_name = string(lpad(ustrip(θᵣ),3,"0"))
-        ip.probe_name = string(lpad(ustrip(θᵣ),3,"0"))
 
 function cbed_center(cbed; threshold=0.1)
     bw_cbed = cbed .> (maximum(cbed) * threshold)
@@ -370,8 +358,6 @@ function align_cbeds(cbeds; threshold=0.1, crop=true)
     else
         ThreadsX.map((x, y) -> shift_cbed(x; v=y), cbeds, centers)
     end
-
-    return sweep_result
 end
 
 function load_mib(filename::String; threshold=0.1, align=false, quadrant=1)
@@ -382,8 +368,87 @@ function load_mib(filename::String; threshold=0.1, align=false, quadrant=1)
     return align ? align_cbeds(cbeds, threshold=threshold) : cbeds
 end
 
-function defocus_sweep()
-    
+# output_file = "/home/chen/Data/ssd/2022-05-27/20220526_195851/rotation_search_1to360.h5"
+# TODO: Add parallel loading 
+function rotation_angle_sweep(𝒜, p::PtychoParams, ip::IterParams; angle_range=1°:1°:360°)
+    object_size = (1, 1)
+    selection_aperture = circular_aperture(10, 1)
+    let p = p
+        p.rotation_angle = 0°
+        𝒪, ℴ = make_object(p)
+        object_size = min(size(𝒪)...)
+        selection_aperture = circular_aperture(object_size, object_size / 2 - 1)
+    end
+    sweep_result = map(angle_range) do θᵣ
+        p.rotation_angle = θᵣ
+        ip.object_name = string(lpad(ustrip(θᵣ),3,"0"))
+        ip.probe_name = string(lpad(ustrip(θᵣ),3,"0"))
+
+        𝒪, ℴ = make_object(p)
+        𝒫 = make_probe(p)
+        ptycho_reconstruction!(𝒪, ℴ, 𝒫, 𝒜, ip)
+
+        if ip.filename != ""
+            save_result(𝒪, 𝒫, ip; ptycho_params=p)
+        end
+
+        return θᵣ, std(angle.(selection_aperture .* crop_center(𝒪, object_size)))
+    end
+
+    if ip.filename != ""
+        h5write(ip.filename, "/sweep_result/rotation", [ustrip(first.(sweep_result)) last.(sweep_result)])
+    end
+    return sweep_result
+end
+
+function stepsize_sweep(𝒜, p::PtychoParams, ip::IterParams; stepsize_pct_range=0.9:0.01:1.1)
+    d₀ = p.step_size
+    sweep_result = map(stepsize_pct_range) do x
+        p.step_size = x * d₀
+        ip.object_name = "stepsize_pct_" * string(lpad(ustrip(x),6,"0")) * "percent" 
+        ip.probe_name = "stepsize_pct_" * string(lpad(ustrip(x),6,"0")) * "percent"
+
+        𝒪, ℴ = make_object(p)
+        𝒫 = make_probe(p)
+        ptycho_reconstruction!(𝒪, ℴ, 𝒫, 𝒜, ip)
+
+        if ip.filename != ""
+            save_result(𝒪, 𝒫, ip; ptycho_params=p)
+        end
+
+        return x * d₀, std(angle.(𝒪))
+    end
+
+    if ip.filename != ""
+        h5write(ip.filename, "/sweep_result/stepsize", [ustrip(first.(sweep_result)) last.(sweep_result)])
+    end
+
+    return sweep_result
+end
+
+function defocus_sweep(𝒜, p::PtychoParams, ip::IterParams; defocus_pct_range=0.9:0.01:1.1)
+    Δf₀ = p.defocus
+    sweep_result = map(defocus_pct_range) do x
+        p.defocus = x * Δf₀
+        ip.object_name = "defocus_pct_" * string(lpad(ustrip(x),6,"0")) * "percent"
+        ip.probe_name = "defocus_pct_" * string(lpad(ustrip(x),6,"0")) * "percent"
+
+        𝒪, ℴ = make_object(p)
+        𝒫 = make_probe(p)
+        ptycho_reconstruction!(𝒪, ℴ, 𝒫, 𝒜, ip)
+
+        if ip.filename != ""
+            save_result(𝒪, 𝒫, ip; ptycho_params=p)
+        end
+
+        return x * Δf₀, std(angle.(𝒪))
+    end
+
+    if ip.filename != ""
+        h5write(ip.filename, "/sweep_result/defocus", [ustrip(first.(sweep_result)) last.(sweep_result)])
+    end
+
+    return sweep_result
 end
 
 end
