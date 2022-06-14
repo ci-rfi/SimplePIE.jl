@@ -54,6 +54,7 @@ export align_cbeds
 export rotation_angle_sweep
 export stepsize_sweep
 export defocus_sweep
+export parameter_sweep
 
 @option mutable struct PtychoParams
     detector_array_size::Int = 0
@@ -279,12 +280,12 @@ end
 function ptycho_reconstruction!(𝒪, ℴ, 𝒫, 𝒜, nᵢ; method="ePIE", α=Float32(0.01), β=Float32(0.01), GPUs::Vector{Int}=Int[], plotting=false)
     ngpu = length(GPUs)
     for _ in 1:nᵢ
-        if ngpu == 0
-            @time Threads.@threads for i in shuffle(eachindex(𝒜))
+        @time if ngpu == 0
+            Threads.@threads for i in shuffle(eachindex(𝒜))
                 ptycho_iteration!(ℴ[i], 𝒫, 𝒜[i]; method=method, α=α, β=β)
             end
         else 
-            @time Threads.@threads for i in shuffle(eachindex(𝒜))
+            Threads.@threads for i in shuffle(eachindex(𝒜))
                 CUDA.device!(GPUs[i % ngpu + 1])
                 gpu_ptycho_iteration!(ℴ[i], 𝒫, 𝒜[i]; method=method, α=α, β=β)
             end
@@ -306,21 +307,21 @@ end
 
 
 function save_object(filename, 𝒪; object_name="", object_params=ObjectParams(), data_type=ComplexF32)
-    h5write(filename, "/object" * object_name, convert(Matrix{data_type}, 𝒪))
-    h5write(filename, "/object" * object_name * "_params", to_toml(object_params))
+    h5write(filename, "/" * join(filter(!isempty, ["object", object_name]), "_"), convert(Matrix{data_type}, 𝒪))
+    h5write(filename, "/" * join(filter(!isempty, ["object", object_name, "params"]), "_"), to_toml(object_params))
 end
 save_object(𝒪, ip::IterParams; kwargs...) = save_object(ip.filename; object_name=ip.object_name, kwargs...)
 
 function save_probe(filename, 𝒫; probe_name="", probe_params=ProbeParams(), data_type=ComplexF32)
-    h5write(filename, "/probe" * probe_name, convert(Matrix{data_type}, 𝒫))
-    h5write(filename, "/probe" * probe_name * "_params", to_toml(probe_params))
+    h5write(filename, "/" * join(filter(!isempty, ["probe", probe_name]), "_"), convert(Matrix{data_type}, 𝒫))
+    h5write(filename, "/" * join(filter(!isempty, ["probe", probe_name, "params"]), "_"), to_toml(probe_params))
 end
 save_probe(𝒫, ip::IterParams; kwargs...) = save_probe(ip.filename; probe_name=ip.probe_name, kwargs...)
 
-function save_result(filename, 𝒪, 𝒫; object_name="", probe_name="", object_params=ObjectParams(), probe_params=ProbeParams(), ptycho_params=PtychoParams(), data_type=ComplexF32)
+function save_result(filename, 𝒪, 𝒫; object_name="", probe_name="", ptycho_params=PtychoParams(), object_params=ObjectParams(ptycho_params), probe_params=ProbeParams(ptycho_params), data_type=ComplexF32)
     save_object(filename, 𝒪; object_name=object_name, object_params=object_params, data_type=data_type)
     save_probe(filename, 𝒫; probe_name=probe_name, probe_params=probe_params, data_type=data_type)
-    h5write(filename, "/ptycho" * object_name * "_params", to_toml(ptycho_params))
+    h5write(filename, "/" * join(filter(!isempty, ["ptycho", object_name, "params"]), "_"), to_toml(ptycho_params))
 end
 save_result(𝒪, 𝒫, ip::IterParams; kwargs...) = save_result(ip.filename, 𝒪, 𝒫; object_name=ip.object_name, probe_name=ip.probe_name, kwargs...)
 
@@ -362,27 +363,47 @@ end
 
 function load_mib(filename::String; threshold=0.1, align=false, quadrant=1)
     data, _ = Medipix.load_mib(filename)
-    ranges = [[257:512, 257:512], [1:256, 257:512], [1:256, 1:256], [257:512, 1:256], [1:512, 1:512]]
-    quadrant_range = ranges[quadrant]
-    cbeds = map(x -> x[quadrant_range...], data)
+    if first(size(data)) == 512
+        ranges = [[257:512, 257:512], [1:256, 257:512], [1:256, 1:256], [257:512, 1:256], [1:512, 1:512]]
+        quadrant_range = ranges[quadrant]
+        cbeds = map(x -> x[quadrant_range...], data)
+    else
+        cbeds = data
+    end
     return align ? align_cbeds(cbeds, threshold=threshold) : cbeds
 end
 
-# output_file = "/home/chen/Data/ssd/2022-05-27/20220526_195851/rotation_search_1to360.h5"
-# TODO: Add parallel loading 
-function rotation_angle_sweep(𝒜, p::PtychoParams, ip::IterParams; angle_range=1°:1°:360°)
-    object_size = (1, 1)
-    selection_aperture = circular_aperture(10, 1)
-    let p = p
-        p.rotation_angle = 0°
-        𝒪, ℴ = make_object(p)
-        object_size = min(size(𝒪)...)
-        selection_aperture = circular_aperture(object_size, object_size / 2 - 1)
+function parameter_sweep(𝒜, p₀::PtychoParams, ip₀::IterParams; parameter="rotation", mode="pct", range=1.0:1.0:1.0, metric="std")
+    if parameter ∉ ["rotation", "defocus", "step_size"]
+        @error "$parameter sweep is not implemented. Possible parameters: rotation, defocus, and step_size"
     end
-    sweep_result = map(angle_range) do θᵣ
-        p.rotation_angle = θᵣ
-        ip.object_name = string(lpad(ustrip(θᵣ),3,"0"))
-        ip.probe_name = string(lpad(ustrip(θᵣ),3,"0"))
+    
+    if mode ∉ ["pct", "value"]
+        @error "$mode mode is not implemented. Possible modes: pct and value"
+    end
+
+    if metric ∉ ["std", "max", "min", "mean"]
+        @error "$metric is not one of the implemented metrics. Possible metrics: std, max, min, and mean"
+    end
+
+    # preserve original params
+    p = p₀
+    ip = ip₀
+
+    sweep_result = map(range) do x
+        if parameter == "rotation"
+            δ = mode == "pct" ? p₀.rotation_angle * x : x
+            p.rotation_angle = δ
+        elseif parameter == "defocus"
+            δ = mode == "pct" ? p₀.defocus * x : x
+            p.defocus = δ
+        elseif parameter == "step_size"
+            δ = mode == "pct" ? p₀.step_size * x : x
+            p.step_size = δ
+        end
+
+        ip.object_name = join(filter(!isempty, [parameter, mode, string(lpad(ustrip(x), 8, "0"))]), "_")
+        ip.probe_name = join(filter(!isempty, [parameter, mode, string(lpad(ustrip(x), 8, "0"))]), "_")
 
         𝒪, ℴ = make_object(p)
         𝒫 = make_probe(p)
@@ -392,60 +413,29 @@ function rotation_angle_sweep(𝒜, p::PtychoParams, ip::IterParams; angle_range
             save_result(𝒪, 𝒫, ip; ptycho_params=p)
         end
 
-        return θᵣ, std(angle.(selection_aperture .* crop_center(𝒪, object_size)))
-    end
-
-    if ip.filename != ""
-        h5write(ip.filename, "/sweep_result/rotation", [ustrip(first.(sweep_result)) last.(sweep_result)])
-    end
-    return sweep_result
-end
-
-function stepsize_sweep(𝒜, p::PtychoParams, ip::IterParams; stepsize_pct_range=0.9:0.01:1.1)
-    d₀ = p.step_size
-    sweep_result = map(stepsize_pct_range) do x
-        p.step_size = x * d₀
-        ip.object_name = "stepsize_pct_" * string(lpad(ustrip(x),6,"0")) * "percent" 
-        ip.probe_name = "stepsize_pct_" * string(lpad(ustrip(x),6,"0")) * "percent"
-
-        𝒪, ℴ = make_object(p)
-        𝒫 = make_probe(p)
-        ptycho_reconstruction!(𝒪, ℴ, 𝒫, 𝒜, ip)
-
-        if ip.filename != ""
-            save_result(𝒪, 𝒫, ip; ptycho_params=p)
+        phase = angle.(𝒪)
+        if parameter == "rotation"
+            p.rotation_angle = 0°
+            object_size = min(size(first(make_object(p)))...)
+            selection_aperture = circular_aperture(object_size, object_size / 2 - 1)
+            phase = std(selection_aperture .* crop_center(phase, object_size))
         end
 
-        return x * d₀, std(angle.(𝒪))
-    end
-
-    if ip.filename != ""
-        h5write(ip.filename, "/sweep_result/stepsize", [ustrip(first.(sweep_result)) last.(sweep_result)])
-    end
-
-    return sweep_result
-end
-
-function defocus_sweep(𝒜, p::PtychoParams, ip::IterParams; defocus_pct_range=0.9:0.01:1.1)
-    Δf₀ = p.defocus
-    sweep_result = map(defocus_pct_range) do x
-        p.defocus = x * Δf₀
-        ip.object_name = "defocus_pct_" * string(lpad(ustrip(x),6,"0")) * "percent"
-        ip.probe_name = "defocus_pct_" * string(lpad(ustrip(x),6,"0")) * "percent"
-
-        𝒪, ℴ = make_object(p)
-        𝒫 = make_probe(p)
-        ptycho_reconstruction!(𝒪, ℴ, 𝒫, 𝒜, ip)
-
-        if ip.filename != ""
-            save_result(𝒪, 𝒫, ip; ptycho_params=p)
+        if metric == "std"
+            result = std(phase)
+        elseif metric == "max"
+            result = maximum(phase)
+        elseif metric == "min"
+            result = minimum(phase)
+        elseif metric == "mean"
+            result = mean(phase)
         end
 
-        return x * Δf₀, std(angle.(𝒪))
+        return δ, result
     end
 
     if ip.filename != ""
-        h5write(ip.filename, "/sweep_result/defocus", [ustrip(first.(sweep_result)) last.(sweep_result)])
+        h5write(ip.filename, "/" * join("result", parameter, mode, "sweep"), [ustrip(first.(sweep_result)) last.(sweep_result)])
     end
 
     return sweep_result
