@@ -1,5 +1,5 @@
 detector_array_size = 256
-scan_array_size = 127
+scan_array_size = [127, 127]
 wavelength = [0.001968748903825481, "nm"]
 convergence_semi_angle = [1.034, "mrad"]
 fourier_space_sampling = [0.016544, "mrad"]

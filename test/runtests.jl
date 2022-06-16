@@ -6,7 +6,7 @@ using Test
 @testset "SimplePIE.jl" begin
     # Write your tests here.
     N = 256
-    n = 127
+    n = [127, 127]
     λ = wavelength(300kV)
     α = 1.0340mrad
     D = 125

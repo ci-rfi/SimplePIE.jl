@@ -26,11 +26,12 @@ export PtychoParams
 export ObjectParams
 export ProbeParams
 export IterParams
+export SweepParams
 export from_toml
 
 export wavelength
 export circular_aperture
-export define_probe_positions
+export make_grid
 export make_object
 export sum_sqrt_mean
 export make_probe
@@ -58,7 +59,7 @@ export parameter_sweep
 
 @option mutable struct PtychoParams
     detector_array_size::Int = 0
-    scan_array_size::Int = 0
+    scan_array_size::Vector{Int} = [0, 0]
     wavelength::typeof(1.0nm) = 0.0nm
     convergence_semi_angle::typeof(1.0mrad) = 0.0mrad
     fourier_space_sampling::typeof(1.0mrad) = 0.0mrad
@@ -73,7 +74,7 @@ end
 @option mutable struct ObjectParams
     step_size::typeof(1.0Å) = 0.0Å
     rotation_angle::typeof(1.0°) = 0.0°
-    scan_array_size::Int = 0
+    scan_array_size::Vector{Int} = [0, 0]
     detector_array_size::Int = 0
     real_space_sampling::typeof(1.0Å) = 0.0Å
 end
@@ -90,6 +91,13 @@ ObjectParams(p::PtychoParams) = ObjectParams(p.step_size, p.rotation_angle, p.sc
 end
 ProbeParams(p::PtychoParams) = ProbeParams(p.convergence_semi_angle, p.detector_array_size, p.defocus, p.fourier_space_sampling, p.real_space_sampling, p.wavelength, p.amplitude_sum)
 
+@option mutable struct SweepParams
+    sweep_parameter::String="rotation"
+    sweep_mode::String="pct"
+    sweep_range::Vector=collect(1.0:1.0:1.0)
+    sweep_metric::String="std"
+end
+
 @option mutable struct IterParams
     iteration_start::Int = 1
     iteration_end::Int = 1
@@ -102,14 +110,15 @@ ProbeParams(p::PtychoParams) = ProbeParams(p.convergence_semi_angle, p.detector_
     filename::String = ""
     object_name::String = ""
     probe_name::String = ""
+    sweep::SweepParams = SweepParams()
 end
-IterParams(p::PtychoParams) = IterParams(p.iteration_start, p.iteration_end, p.alpha, p.beta, p.gpu, p.shuffle, p.filename, p.object_name, p.probe_name)
+# IterParams(p::PtychoParams) = IterParams(p.iteration_start, p.iteration_end, p.alpha, p.beta, p.gpu, p.shuffle, p.filename, p.object_name, p.probe_name)
 
 function unitAsString(unitOfQuantity::Unitful.FreeUnits) 
     replace(repr(unitOfQuantity,context = Pair(:fancy_exponent,false)), " " => "*")
 end
 
-OT = Union{PtychoParams, ObjectParams, ProbeParams}
+OT = Union{PtychoParams, ObjectParams, ProbeParams, IterParams, SweepParams}
 Configurations.from_dict(::Type{T} where T<:OT, ::Type{T} where T<:Unitful.Quantity, x) = x[1] * uparse(x[2])
 Configurations.to_dict(::Type{T} where T<:OT, x::T where T<:Unitful.Quantity) = [ustrip(x), unitAsString(unit(x))]
 
@@ -139,23 +148,23 @@ function circular_aperture(n::Integer, r; shift=CartesianIndex(0, 0), σ=0)
     return aperture
 end
 
-function define_probe_positions(dₛ, θᵣ, n₁, n₂; offset=[zero(dₛ), zero(dₛ)])
-    init_positions = [[(cos(θᵣ)j - sin(θᵣ)i)dₛ, (cos(θᵣ)i + sin(θᵣ)j)dₛ] for (i,j) in product(1:n₁, 1:n₂)]
-    min_x = minimum(first, init_positions)
-    min_y = minimum(last, init_positions)
-    positions = map(init_positions) do p
+function make_grid(dₛ, θᵣ, n₁, n₂; offset=[zero(dₛ), zero(dₛ)])
+    init_grid = [[(cos(θᵣ)j - sin(θᵣ)i)dₛ, (cos(θᵣ)i + sin(θᵣ)j)dₛ] for (i,j) in product(1:n₁, 1:n₂)]
+    min_x = minimum(first, init_grid)
+    min_y = minimum(last, init_grid)
+    grid = map(init_grid) do p
         p .- [min_x, min_y] .+ offset
     end
-    return positions 
+    return grid 
 end
-define_probe_positions(dₛ, θᵣ, n; kwargs...) = define_probe_positions(dₛ, θᵣ, n, n; kwargs...)
-define_probe_positions(p::PtychoParams; kwargs...) = define_probe_positions(p.step_size, p.rotation_angle, p.scan_array_size; kwargs...)
+make_grid(dₛ, θᵣ, n; kwargs...) = make_grid(dₛ, θᵣ, n, n; kwargs...)
+make_grid(p::PtychoParams; kwargs...) = make_grid(p.step_size, p.rotation_angle, first(p.scan_array_size), last(p.scan_array_size); kwargs...)
 
-function make_object(positions, N, Δx, Δy; data_type=ComplexF32)
-    min_x = minimum(first, positions)
-    min_y = minimum(last, positions)
-    max_x = maximum(first, positions)
-    max_y = maximum(last, positions)
+function make_object(grid, N, Δx, Δy; data_type=ComplexF32)
+    min_x = minimum(first, grid)
+    min_y = minimum(last, grid)
+    max_x = maximum(first, grid)
+    max_y = maximum(last, grid)
 
     padding_x = 0.5(N+1) * Δx
     padding_y = 0.5(N+1) * Δy
@@ -169,7 +178,7 @@ function make_object(positions, N, Δx, Δy; data_type=ComplexF32)
     ny = length(𝒪_min_y:Δy:𝒪_max_y)
 
     𝒪 = AxisArray(ones(data_type, nx,ny); x = (𝒪_min_x:Δx:𝒪_max_x), y = (𝒪_min_y:Δy:𝒪_max_y))
-    ℴ = map(positions) do p
+    ℴ = map(grid) do p
         x1 = p[1] - Δx*N/2
         x2 = p[1] + Δx*N/2
         y1 = p[2] - Δy*N/2
@@ -178,8 +187,8 @@ function make_object(positions, N, Δx, Δy; data_type=ComplexF32)
     end
     return 𝒪, ℴ
 end
-make_object(positions, N, Δx; data_type=ComplexF32) = make_object(positions, N, Δx, Δx; data_type=data_type)
-make_object(op::ObjectParams; data_type=ComplexF32, kwargs...) = make_object(define_probe_positions(op.step_size, op.rotation_angle, op.scan_array_size; kwargs...), op.detector_array_size, op.real_space_sampling; data_type=data_type)
+make_object(grid, N, Δx; data_type=ComplexF32) = make_object(grid, N, Δx, Δx; data_type=data_type)
+make_object(op::ObjectParams; data_type=ComplexF32, kwargs...) = make_object(make_grid(op.step_size, op.rotation_angle, first(op.scan_array_size), last(op.scan_array_size); kwargs...), op.detector_array_size, op.real_space_sampling; data_type=data_type)
 make_object(p::PtychoParams; data_type=ComplexF32, kwargs...) = make_object(ObjectParams(p); data_type=data_type, kwargs...)
 
 function sum_sqrt_mean(dps)
@@ -277,9 +286,9 @@ function plot_wave(𝒲; unwrap_phase=false)
     return plot(p1, p2, layout=(1,2))
 end
 
-function ptycho_reconstruction!(𝒪, ℴ, 𝒫, 𝒜, nᵢ; method="ePIE", α=Float32(0.01), β=Float32(0.01), GPUs::Vector{Int}=Int[], plotting=false)
+function ptycho_reconstruction!(𝒪, ℴ, 𝒫, 𝒜; method="ePIE", ni=1, α=Float32(0.01), β=Float32(0.01), GPUs::Vector{Int}=Int[], plotting=false)
     ngpu = length(GPUs)
-    for _ in 1:nᵢ
+    for _ in 1:ni
         @time if ngpu == 0
             Threads.@threads for i in shuffle(eachindex(𝒜))
                 ptycho_iteration!(ℴ[i], 𝒫, 𝒜[i]; method=method, α=α, β=β)
@@ -298,30 +307,30 @@ function ptycho_reconstruction!(𝒪, ℴ, 𝒫, 𝒜, nᵢ; method="ePIE", α=F
     end
     return nothing
 end
-ptycho_reconstruction!(𝒪, ℴ, 𝒫, 𝒜; kwargs...) = ptycho_reconstruction!(𝒪, ℴ, 𝒫, 𝒜, 1; kwargs...)
+ptycho_reconstruction!(𝒪, ℴ, 𝒫, 𝒜, positions::UnitRange, kwargs...) = ptycho_reconstruction!(𝒪, ℴ[positions], 𝒫, 𝒜; kwargs...)
 
 function ptycho_reconstruction!(𝒪, ℴ, 𝒫, 𝒜, ip::IterParams)
-    nᵢ = length(range(ip.iteration_start, ip.iteration_end))
-    ptycho_reconstruction!(𝒪, ℴ, 𝒫, 𝒜, nᵢ; method=ip.method, α=ip.alpha, β=ip.beta, GPUs=ip.GPUs, plotting=ip.plotting)
+    ni = length(range(ip.iteration_start, ip.iteration_end))
+    ptycho_reconstruction!(𝒪, ℴ, 𝒫, 𝒜; method=ip.method, ni=ni, α=ip.alpha, β=ip.beta, GPUs=ip.GPUs, plotting=ip.plotting)
 end
 
 
 function save_object(filename, 𝒪; object_name="", object_params=ObjectParams(), data_type=ComplexF32)
-    h5write(filename, "/" * join(filter(!isempty, ["object", object_name]), "_"), convert(Matrix{data_type}, 𝒪))
-    h5write(filename, "/" * join(filter(!isempty, ["object", object_name, "params"]), "_"), to_toml(object_params))
+    h5write(filename, join(filter(!isempty, ["/object", object_name]), "_"), convert(Matrix{data_type}, 𝒪))
+    h5write(filename, join(filter(!isempty, ["/object", object_name, "params"]), "_"), to_toml(object_params))
 end
 save_object(𝒪, ip::IterParams; kwargs...) = save_object(ip.filename; object_name=ip.object_name, kwargs...)
 
 function save_probe(filename, 𝒫; probe_name="", probe_params=ProbeParams(), data_type=ComplexF32)
-    h5write(filename, "/" * join(filter(!isempty, ["probe", probe_name]), "_"), convert(Matrix{data_type}, 𝒫))
-    h5write(filename, "/" * join(filter(!isempty, ["probe", probe_name, "params"]), "_"), to_toml(probe_params))
+    h5write(filename, join(filter(!isempty, ["/probe", probe_name]), "_"), convert(Matrix{data_type}, 𝒫))
+    h5write(filename, join(filter(!isempty, ["/probe", probe_name, "params"]), "_"), to_toml(probe_params))
 end
 save_probe(𝒫, ip::IterParams; kwargs...) = save_probe(ip.filename; probe_name=ip.probe_name, kwargs...)
 
 function save_result(filename, 𝒪, 𝒫; object_name="", probe_name="", ptycho_params=PtychoParams(), object_params=ObjectParams(ptycho_params), probe_params=ProbeParams(ptycho_params), data_type=ComplexF32)
     save_object(filename, 𝒪; object_name=object_name, object_params=object_params, data_type=data_type)
     save_probe(filename, 𝒫; probe_name=probe_name, probe_params=probe_params, data_type=data_type)
-    h5write(filename, "/" * join(filter(!isempty, ["ptycho", object_name, "params"]), "_"), to_toml(ptycho_params))
+    h5write(filename, join(filter(!isempty, ["/ptycho", object_name, "params"]), "_"), to_toml(ptycho_params))
 end
 save_result(𝒪, 𝒫, ip::IterParams; kwargs...) = save_result(ip.filename, 𝒪, 𝒫; object_name=ip.object_name, probe_name=ip.probe_name, kwargs...)
 
@@ -373,7 +382,15 @@ function load_mib(filename::String; threshold=0.1, align=false, quadrant=1)
     return align ? align_cbeds(cbeds, threshold=threshold) : cbeds
 end
 
-function parameter_sweep(𝒜, p₀::PtychoParams, ip₀::IterParams; parameter="rotation", mode="pct", range=1.0:1.0:1.0, metric="std")
+function parameter_sweep(𝒜, p₀::PtychoParams, ip₀::IterParams)
+    # preserve original params
+    p = p₀
+    ip = ip₀
+
+    parameter = ip.sweep.parameter 
+    mode = ip.sweep.mode 
+    range = ip.sweep.range 
+    metric = ip.sweep.metric 
     if parameter ∉ ["rotation", "defocus", "step_size"]
         @error "$parameter sweep is not implemented. Possible parameters: rotation, defocus, and step_size"
     end
@@ -385,10 +402,6 @@ function parameter_sweep(𝒜, p₀::PtychoParams, ip₀::IterParams; parameter=
     if metric ∉ ["std", "max", "min", "mean"]
         @error "$metric is not one of the implemented metrics. Possible metrics: std, max, min, and mean"
     end
-
-    # preserve original params
-    p = p₀
-    ip = ip₀
 
     sweep_result = map(range) do x
         if parameter == "rotation"
@@ -435,10 +448,13 @@ function parameter_sweep(𝒜, p₀::PtychoParams, ip₀::IterParams; parameter=
     end
 
     if ip.filename != ""
-        h5write(ip.filename, "/" * join("result", parameter, mode, "sweep"), [ustrip(first.(sweep_result)) last.(sweep_result)])
+        h5write(ip.filename, join("/result", parameter, mode, "sweep"), [ustrip(first.(sweep_result)) last.(sweep_result)])
     end
-
     return sweep_result
+end
+
+function filter_positions(center, positions, r)
+    filter(x -> euclidean(center, x) < r, positions)
 end
 
 end
