@@ -480,8 +480,24 @@ function parameter_sweep(𝒜, dp₀::DataParams, rp₀::ReconParams)
     return sweep_result
 end
 
-function filter_positions(center, positions, r)
-    filter(x -> euclidean(center, x) < r, positions)
+function positions_in_roi(center, positions, r; roi_shape="circle")
+    if roi_shape == "circle"
+        filter(x -> euclidean(center, x) < r, positions)
+    elseif roi_shape == "square"
+        filter(x -> all(euclidean.(center, x) .< r/2), positions)
+    else
+        @warn "\"$roi_shape\" is not a supported roi shape, default to \"circle\"."
+        positions_in_roi(center, positions, r; roi_shape="circle")
+    end
 end
+
+function linear_positions(grid, positions)
+    if eltype(positions) == Int
+        map(x -> LinearIndices(grid)[x...], positions)
+    else
+        map(x -> LinearIndices(grid)[x], findall(!iszero, map(x -> x ∈ positions, grid)))
+    end
+end
+linear_positions(dp::DataParams, positions; kwargs...) = linear_positions(make_grid(dp; kwargs...), positions)
 
 end
