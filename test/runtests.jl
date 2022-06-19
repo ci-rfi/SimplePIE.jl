@@ -5,7 +5,13 @@ using Test
 
 @testset "SimplePIE.jl" begin
     # Write your tests here.
-    N = 256
+    project::String = "test_project"
+    session::String = "test_session"
+    datadir::String = "test_dir"
+    datafile::String = "test_data.h5"
+    timestamp::String = "2022-01-01T01:01:01.001"
+
+    N = [256, 256]
     n = [127, 127]
     λ = wavelength(300kV)
     α = 1.0340mrad
@@ -14,7 +20,7 @@ using Test
     θ = N * Δk
     θᵣ = -126°
     dₛ = 31.25Å
-    Δx = uconvert(Å, λ/θ)
+    Δx, Δy = uconvert.(Å, λ./θ)
     Δf = -13μm
     𝒜_sum = 47317.77435855447
 

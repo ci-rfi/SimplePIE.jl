@@ -71,7 +71,7 @@ export linear_positions
     wavelength::typeof(1.0nm) = 0.0nm
     convergence_semi_angle::typeof(1.0mrad) = 0.0mrad
     fourier_space_sampling::typeof(1.0mrad) = 0.0mrad
-    maximum_angle::typeof(1.0mrad) = 0.0mrad
+    maximum_angle::typeof([1.0mrad, 1.0mrad]) = [0.0mrad, 0.0mrad]
     rotation_angle::typeof(1.0°) = 0.0°
     step_size::typeof(1.0Å) = 0.0Å
     real_space_sampling::typeof(1.0Å) = 0.0Å
@@ -83,14 +83,14 @@ end
     step_size::typeof(1.0Å) = 0.0Å
     rotation_angle::typeof(1.0°) = 0.0°
     scan_array_size::Vector{Int} = [0, 0]
-    detector_array_size::Int = 0
+    detector_array_size::Vector{Int} = [0, 0]
     real_space_sampling::typeof(1.0Å) = 0.0Å
 end
 ObjectParams(dp::DataParams) = ObjectParams(dp.step_size, dp.rotation_angle, dp.scan_array_size, dp.detector_array_size, dp.real_space_sampling)
 
 @option mutable struct ProbeParams
     convergence_semi_angle::typeof(1.0mrad) = 0.0mrad
-    detector_array_size::Int = 0
+    detector_array_size::Vector{Int} = [0, 0]
     defocus::typeof(1.0μm) = 0.0μm
     fourier_space_sampling::typeof(1.0mrad) = 0.0mrad
     real_space_sampling::typeof(1.0Å) = 0.0Å
@@ -143,9 +143,9 @@ function wavelength(V)::typeof(1.0u"nm")
     return λ
 end
 
-function circular_aperture(n::Integer, r; shift=CartesianIndex(0, 0), σ=0)
-    data = Matrix{Bool}(undef, n, n)
-    if n <= 2r 
+function circular_aperture(n, r; shift=CartesianIndex(0, 0), σ=0)
+    data = Matrix{Bool}(undef, first(n), last(n))
+    if min(n...) <= 2r 
         @warn("Aperature area exceeds the field of view even if centered.") 
     end
     origin =  CartesianIndex(ceil.(Int, size(data) ./ 2)...) + shift
@@ -156,7 +156,9 @@ function circular_aperture(n::Integer, r; shift=CartesianIndex(0, 0), σ=0)
     return aperture
 end
 
-function make_grid(dₛ, θᵣ, n₁, n₂; offset=[zero(dₛ), zero(dₛ)])
+function make_grid(dₛ, θᵣ, n; offset=[zero(dₛ), zero(dₛ)])
+    n₁ = first(n)
+    n₂ = last(n)
     init_grid = [[(cos(θᵣ)j - sin(θᵣ)i)dₛ, (cos(θᵣ)i + sin(θᵣ)j)dₛ] for (i,j) in product(1:n₁, 1:n₂)]
     min_x = minimum(first, init_grid)
     min_y = minimum(last, init_grid)
@@ -165,17 +167,20 @@ function make_grid(dₛ, θᵣ, n₁, n₂; offset=[zero(dₛ), zero(dₛ)])
     end
     return grid 
 end
-make_grid(dₛ, θᵣ, n; kwargs...) = make_grid(dₛ, θᵣ, n, n; kwargs...)
-make_grid(p::PtychoParams; kwargs...) = make_grid(p.step_size, p.rotation_angle, first(p.scan_array_size), last(p.scan_array_size); kwargs...)
+make_grid(dp::DataParams; kwargs...) = make_grid(dp.step_size, dp.rotation_angle, dp.scan_array_size; kwargs...)
 
-function make_object(grid, N, Δx, Δy; data_type=ComplexF32)
+function make_object(grid, N, Δx; data_type=ComplexF32)
+    N₁ = first(N)
+    N₂ = last(N)
+    Δy = Δx
+
     min_x = minimum(first, grid)
     min_y = minimum(last, grid)
     max_x = maximum(first, grid)
     max_y = maximum(last, grid)
 
-    padding_x = 0.5(N+1) * Δx
-    padding_y = 0.5(N+1) * Δy
+    padding_x = 0.5(N₁+1) * Δx
+    padding_y = 0.5(N₂+1) * Δy
 
     𝒪_min_x = min_x - padding_x
     𝒪_min_y = min_y - padding_y 
@@ -185,12 +190,12 @@ function make_object(grid, N, Δx, Δy; data_type=ComplexF32)
     nx = length(𝒪_min_x:Δx:𝒪_max_x)
     ny = length(𝒪_min_y:Δy:𝒪_max_y)
 
-    𝒪 = AxisArray(ones(data_type, nx,ny); x = (𝒪_min_x:Δx:𝒪_max_x), y = (𝒪_min_y:Δy:𝒪_max_y))
+    𝒪 = AxisArray(ones(data_type, nx, ny); x = (𝒪_min_x:Δx:𝒪_max_x), y = (𝒪_min_y:Δy:𝒪_max_y))
     ℴ = map(grid) do p
-        x1 = p[1] - Δx*N/2
-        x2 = p[1] + Δx*N/2
-        y1 = p[2] - Δy*N/2
-        y2 = p[2] + Δy*N/2
+        x1 = p[1] - Δx*N₁/2
+        x2 = p[1] + Δx*N₁/2
+        y1 = p[2] - Δy*N₂/2
+        y2 = p[2] + Δy*N₂/2
         view(𝒪, x1 .. x2, y1 .. y2)
     end
     return 𝒪, ℴ
@@ -203,7 +208,11 @@ function sum_sqrt_mean(cbeds)
 end
 
 function make_probe(α, N, Δf, Δk, Δx, λ, mean_amplitude_sum; data_type=ComplexF32)
-    K = [Δk * [i,j] for (i,j) in product(-N/2:N/2-1, -N/2:N/2-1)]
+    N₁ = first(N)
+    N₂ = last(N)
+    Δy = Δx
+
+    K = [Δk * [i,j] for (i,j) in product(-N₁/2:N₁/2-1, -N₂/2:N₂/2-1)]
     ω = map(x -> x[1] + x[2]im, K)
     ωᵢ = map(x -> x[1] - x[2]im, K)
     # ϕ = map(x -> atan(x...), K)
@@ -214,9 +223,11 @@ function make_probe(α, N, Δf, Δk, Δx, λ, mean_amplitude_sum; data_type=Comp
     𝒟 = 𝒟 / sum(abs.(𝒟)) * mean_amplitude_sum
 
     𝒫_array = fftshift(ifft(ifftshift(𝒟))) |> Matrix{data_type}
-    𝒫_min_x = -0.5(N+1) * Δx
-    𝒫_max_x = 0.5(N-2) * Δx
-    𝒫 = AxisArray(𝒫_array; x = (𝒫_min_x:Δx:𝒫_max_x), y = (𝒫_min_x:Δx:𝒫_max_x))
+    𝒫_min_x = -0.5(N₁+1) * Δx
+    𝒫_max_x = 0.5(N₁-2) * Δx
+    𝒫_min_y = -0.5(N₂+1) * Δy
+    𝒫_max_y = 0.5(N₂-2) * Δy
+    𝒫 = AxisArray(𝒫_array; x = (𝒫_min_x:Δx:𝒫_max_x), y = (𝒫_min_y:Δy:𝒫_max_y))
     return 𝒫
 end
 make_probe(pp::ProbeParams; kwargs...) = make_probe(pp.convergence_semi_angle, pp.detector_array_size, pp.defocus, pp.fourier_space_sampling, pp.real_space_sampling, pp.wavelength, pp.amplitude_sum; kwargs...)
@@ -273,14 +284,14 @@ function update!(q, a, Δψ; method="ePIE", α=0.2)
         a² = a .^ 2
         w = (abs.(a) / aₘ) .* (a̅ ./ (a² .+ α * aₘ²))
     else
-        error("$method is not a supported update method.")
+        @error "$method is not a supported update method."
     end
 
     q[:] = q + w .* Δψ
     return nothing
 end
 
-function ptycho_iteration!(𝒪, 𝒫, 𝒜 ; method="ePIE", α=0.2, β=0.2)
+function ptycho_iteration!(𝒪, 𝒫, 𝒜; method="ePIE", α=0.2, β=0.2)
     ψ₁ = 𝒪 .* 𝒫
     𝒟 = 𝒜 .* sign.(fft(ψ₁))
     ψ₂ = ifft(𝒟)
