@@ -1,0 +1,16 @@
+project = "test_project"
+session = "test_session"
+datadir = "test_dir"
+datafile = "test_data.h5"
+timestamp = "2022-01-01T01:01:01.001"
+detector_array_size = [256, 256]
+scan_array_size = [127, 127]
+wavelength = [0.001968748903825481, "nm"]
+convergence_semi_angle = [1.034, "mrad"]
+fourier_space_sampling = [0.016544, "mrad"]
+maximum_angle = [[4.235264, "mrad"], [4.235264, "mrad"]]
+rotation_angle = [-126.0, "°"]
+step_size = [31.25, "Å"]
+real_space_sampling = [4.648467967582377, "Å"]
+defocus = [-13000.0, "nm"]
+amplitude_sum = 47317.77435855447
