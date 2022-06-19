@@ -18,20 +18,20 @@ using Test
     Δf = -13μm
     𝒜_sum = 47317.77435855447
 
-    ptycho_params = PtychoParams(N, n, λ, α, Δk, θ, θᵣ, dₛ, Δx, Δf, 𝒜_sum) 
+    data_params = DataParams(project, session, datadir, datafile, timestamp, N, n, λ, α, Δk, θ, θᵣ, dₛ, Δx, Δf, 𝒜_sum) 
     object_params = ObjectParams(dₛ, θᵣ, n, N, Δx)
     probe_params = ProbeParams(α, N, Δf, Δk, Δx, λ, 𝒜_sum) 
 
-    ptycho_params_from_toml = from_toml(PtychoParams, "ptycho_params.toml")
+    data_params_from_toml = from_toml(DataParams, "data_params.toml")
     object_params_from_toml = from_toml(ObjectParams, "object_params.toml")
     probe_params_from_toml = from_toml(ProbeParams, "probe_params.toml")
 
     @test object_params == object_params_from_toml
     @test probe_params == probe_params_from_toml
 
-    object_params_from_ptycho_params = ObjectParams(ptycho_params)
-    probe_params_from_ptycho_params = ProbeParams(ptycho_params)
+    object_params_from_data_params = ObjectParams(data_params)
+    probe_params_from_data_params = ProbeParams(data_params)
 
-    @test object_params == object_params_from_ptycho_params
-    @test probe_params == probe_params_from_ptycho_params
+    @test object_params == object_params_from_data_params
+    @test probe_params == probe_params_from_data_params
 end
