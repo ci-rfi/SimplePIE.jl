@@ -35,7 +35,8 @@ export make_grid
 export make_object
 export sum_sqrt_mean
 export make_probe
-export load_dps
+export load_cbeds
+export load_mat
 export load_mib
 export make_amplitude
 export ptycho_iteration!
@@ -197,8 +198,8 @@ end
 make_object(op::ObjectParams; data_type=ComplexF32, kwargs...) = make_object(make_grid(op.step_size, op.rotation_angle, op.scan_array_size; kwargs...), op.detector_array_size, op.real_space_sampling; data_type=data_type)
 make_object(dp::DataParams; data_type=ComplexF32, kwargs...) = make_object(ObjectParams(dp); data_type=data_type, kwargs...)
 
-function sum_sqrt_mean(dps)
-    sum(sqrt.(mean(dps))) 
+function sum_sqrt_mean(cbeds)
+    sum(sqrt.(mean(cbeds))) 
 end
 
 function make_probe(α, N, Δf, Δk, Δx, λ, mean_amplitude_sum; data_type=ComplexF32)
@@ -219,17 +220,40 @@ function make_probe(α, N, Δf, Δk, Δx, λ, mean_amplitude_sum; data_type=Comp
     return 𝒫
 end
 make_probe(pp::ProbeParams; kwargs...) = make_probe(pp.convergence_semi_angle, pp.detector_array_size, pp.defocus, pp.fourier_space_sampling, pp.real_space_sampling, pp.wavelength, pp.amplitude_sum; kwargs...)
-make_probe(p::PtychoParams; kwargs...) = make_probe(ProbeParams(p); kwargs...)
+make_probe(dp::DataParams; kwargs...) = make_probe(ProbeParams(dp); kwargs...)
 
-function load_dps(filename, n₁, n₂)
-    dps_mat = matread(filename)["dps"];
-    dps = [dps_mat[:,:, i + (j-1)*n₁] for (i,j) in product(1:n₁, 1:n₂)]
-    return dps
+function load_cbeds(f, filename::String; quadrant=0, align=false, threshold=0.1, crop=true)
+    cbeds = f(filename)
+    if quadrant ∈ [1, 2, 3, 4]
+        l₁, l₂ = Int.(round.(size(first(cbeds)) ./ 2)) 
+        ranges = [[l₁+1:2l₁, l₂+1:2l₂], [1:l₁, l₂+1:2l₂], [1:l₁, 1:l₂], [l₁+1:2l₁, 1:l₂]]
+        cbeds = map(x -> x[ranges[quadrant]...], cbeds)
+    end
+    # n₁ = first(n)
+    # n₂ = last(n)
+    # cbeds = [cbeds_mat[:,:, i + (j-1)*n₁] for (i,j) in product(1:n₁, 1:n₂)]
+    return align ? align_cbeds(cbeds; threshold=threshold, crop=crop) : cbeds
 end
-load_dps(filename, n) = load_dps(filename, n, n)
+load_cbeds(filename; kwargs...) = load_cbeds(x->load_mat(x), filename; kwargs...)
 
-function make_amplitude(dps; data_type=Float32) 
-    ThreadsX.map(x -> fftshift(sqrt.(x))|> Matrix{data_type}, dps)
+# function load_h5(filename)
+#     cbeds = h5read(filename, "dps")
+#     return cbeds
+# end
+
+function load_mat(filename)
+    mat = matread(filename)["dps"]
+    cbeds = [mat[:,:,i] for i in 1:last(size(mat))]
+    return cbeds
+end
+
+function load_mib(filename)
+    cbeds, _ = Medipix.load_mib(filename)
+    return cbeds
+end
+
+function make_amplitude(cbeds; data_type=Float32) 
+    ThreadsX.map(x -> fftshift(sqrt.(x))|> Matrix{data_type}, cbeds)
 end
 
 function update!(q, a, Δψ; method="ePIE", α=0.2) 
