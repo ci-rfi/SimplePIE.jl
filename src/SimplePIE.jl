@@ -492,7 +492,7 @@ function positions_in_roi(center, positions, r; roi_shape="circle")
 end
 
 function linear_positions(grid, positions)
-    if eltype(positions) == Int
+    if eltype(positions) == Vector{Int}
         map(x -> LinearIndices(grid)[x...], positions)
     else
         map(x -> LinearIndices(grid)[x], findall(!iszero, map(x -> x ∈ positions, grid)))
