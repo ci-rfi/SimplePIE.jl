@@ -240,9 +240,6 @@ function load_cbeds(f, filename::String; quadrant=0, align=false, threshold=0.1,
         ranges = [[l₁+1:2l₁, l₂+1:2l₂], [1:l₁, l₂+1:2l₂], [1:l₁, 1:l₂], [l₁+1:2l₁, 1:l₂]]
         cbeds = map(x -> x[ranges[quadrant]...], cbeds)
     end
-    # n₁ = first(n)
-    # n₂ = last(n)
-    # cbeds = [cbeds_mat[:,:, i + (j-1)*n₁] for (i,j) in product(1:n₁, 1:n₂)]
     return align ? align_cbeds(cbeds; threshold=threshold, crop=crop) : cbeds
 end
 load_cbeds(filename; kwargs...) = load_cbeds(x->load_mat(x), filename; kwargs...)
@@ -311,19 +308,27 @@ function gpu_ptycho_iteration!(𝒪_cpu, 𝒫_cpu, 𝒜_cpu; method="ePIE", α::
     return nothing
 end
 
-function plot_amplitude(𝒲)
+function plot_amplitude(𝒲; with_unit=true, kwargs...)
     amplitude = abs.(𝒲)
-    return heatmap(amplitude, aspect_ratio=1)
+    if with_unit
+        return heatmap(amplitude; aspect_ratio=:equal, xlim=(1, size(amplitude, 1)), ylim=(1, size(amplitude, 2)), xrotation=-20, xformatter= x -> round(typeof(1nm), 𝒲.axes[1][Int(x)]), yformatter= y -> round(typeof(1nm), 𝒲.axes[2][Int(y)]), kwargs...)
+    else
+        return heatmap(amplitude; aspect_ratio=:equal)
+    end
 end
 
-function plot_phase(𝒲; unwrap_phase=false)
+function plot_phase(𝒲; unwrap_phase=false, with_unit=true, kwargs...)
     phase = unwrap_phase ? unwrap(angle.(𝒲); dims=1:2) : angle.(𝒲)
-    return heatmap(phase, aspect_ratio=1)
+    if with_unit
+        return heatmap(phase; aspect_ratio=:equal, xlim=(1, size(phase, 1)), ylim=(1, size(phase, 2)), xrotation=-20, xformatter= x -> round(typeof(1nm), 𝒲.axes[1][Int(x)]), yformatter= y -> round(typeof(1nm), 𝒲.axes[2][Int(y)]), kwargs...)
+    else
+        return heatmap(phase; aspect_ratio=:equal)
+    end
 end
 
-function plot_wave(𝒲; unwrap_phase=false)
-    p1 = plot_amplitude(𝒲)
-    p2 = plot_phase(𝒲; unwrap_phase=unwrap_phase)
+function plot_wave(𝒲; unwrap_phase=false, with_unit=true, kwargs...)
+    p1 = plot_amplitude(𝒲; with_unit=with_unit, kwargs...)
+    p2 = plot_phase(𝒲; unwrap_phase=unwrap_phase, with_unit=with_unit, kwargs...)
     return plot(p1, p2, layout=(1,2))
 end
 
