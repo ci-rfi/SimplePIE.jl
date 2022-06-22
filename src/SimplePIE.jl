@@ -35,6 +35,9 @@ export make_grid
 export make_object
 export sum_sqrt_mean
 export make_probe
+export probe_radius
+export probe_area
+export probe_overlap
 export load_cbeds
 export load_mat
 export load_mib
@@ -76,6 +79,10 @@ export linear_positions
     step_size::typeof(1.0Å) = 0.0Å
     real_space_sampling::typeof(1.0Å) = 0.0Å
     defocus::typeof(1.0μm) = 0.0μm
+    probe_radius::typeof(1.0nm) = 0.0nm
+    probe_area::typeof(1.0nm^2) = 0.0nm^2
+    overlap::typeof(1.0nm^2) = 0.0nm^2
+    overlap_ratio::typeof(1.0u"percent") = 0.0u"percent"
     amplitude_sum::Float64 = 0
 end
 
@@ -127,7 +134,7 @@ function unitAsString(unitOfQuantity::Unitful.FreeUnits)
 end
 
 OT = Union{DataParams, ObjectParams, ProbeParams, ReconParams, SweepParams}
-Configurations.from_dict(::Type{T} where T<:OT, ::Type{T} where T<:Unitful.Quantity, x) = x[1] * uparse(x[2])
+Configurations.from_dict(::Type{T} where T<:OT, ::Type{T} where T<:Unitful.Quantity, x) = x[1] * uparse(x[2] == "%" ? "percent" : x[2])
 Configurations.to_dict(::Type{T} where T<:OT, x::T where T<:Unitful.Quantity) = [ustrip(x), unitAsString(unit(x))]
 
 function params_from_toml(::Type{T}, toml_file::String) where T<:OT
@@ -232,6 +239,22 @@ function make_probe(α, N, Δf, Δk, Δx, λ, mean_amplitude_sum; data_type=Comp
 end
 make_probe(pp::ProbeParams; kwargs...) = make_probe(pp.convergence_semi_angle, pp.detector_array_size, pp.defocus, pp.fourier_space_sampling, pp.real_space_sampling, pp.wavelength, pp.amplitude_sum; kwargs...)
 make_probe(dp::DataParams; kwargs...) = make_probe(ProbeParams(dp); kwargs...)
+
+function probe_radius(α, Δf)
+    return uconvert(nm, abs(tan(α) * Δf))
+end
+
+function probe_area(α, Δf)
+    rₚ = probe_radius(α, Δf)
+    return π * rₚ^2
+end
+
+function probe_overlap(rₚ, dₛ; ratio=false)
+    overlap_area = uconvert(nm^2, 2*rₚ^2*acos(dₛ/2rₚ) - 0.5*dₛ*√(4rₚ^2 - dₛ^2))
+    circle_area = π * rₚ^2
+    overlap_ratio = upreferred(overlap_area / circle_area) * 100u"percent"
+    return ratio ? (overlap_area, overlap_ratio) : overlap_area
+end
 
 function load_cbeds(f, filename::String; quadrant=0, align=false, threshold=0.1, crop=true)
     cbeds = f(filename)
