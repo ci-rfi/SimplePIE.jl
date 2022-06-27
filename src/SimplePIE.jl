@@ -288,6 +288,11 @@ function make_amplitude(cbeds; data_type=Float32)
 end
 
 function update!(q, a, Δψ; method="ePIE", α=0.2) 
+    if iszero(α) 
+        return nothing
+    end
+    α = convert(eltype(real(q)), α)
+
     a̅ = conj(a)
     aₘ = maximum(abs, a)
     aₘ² = aₘ^2
