@@ -394,12 +394,14 @@ function save_probe(filename, 𝒫; probe_name="", probe_params=ProbeParams(), d
 end
 save_probe(𝒫, rp::ReconParams; kwargs...) = save_probe(rp.filename, 𝒫; probe_name=rp.probe_name, kwargs...)
 
-function save_result(filename, 𝒪, 𝒫; object_name="", probe_name="", data_params=DataParams(), object_params=ObjectParams(data_params), probe_params=ProbeParams(data_params), data_type=ComplexF32)
+function save_result(filename, 𝒪, 𝒫; object_name="", probe_name="", data_params=DataParams(), recon_params=ReconParams(), object_params=ObjectParams(data_params), probe_params=ProbeParams(data_params), data_type=ComplexF32)
     save_object(filename, 𝒪; object_name=object_name, object_params=object_params, data_type=data_type)
     save_probe(filename, 𝒫; probe_name=probe_name, probe_params=probe_params, data_type=data_type)
-    h5write(filename, join(filter(!isempty, ["/ptycho", object_name, "params"]), "_"), to_toml(data_params))
+    h5write(filename, join(filter(!isempty, ["/data_params", object_name]), "_"), to_toml(data_params))
+    h5write(filename, join(filter(!isempty, ["/recon_params", object_name]), "_"), to_toml(recon_params))
 end
-save_result(𝒪, 𝒫, rp::ReconParams; kwargs...) = save_result(rp.filename, 𝒪, 𝒫; object_name=rp.object_name, probe_name=rp.probe_name, kwargs...)
+save_result(𝒪, 𝒫, rp::ReconParams; kwargs...) = save_result(rp.filename, 𝒪, 𝒫; object_name=rp.object_name, probe_name=rp.probe_name, recon_params=rp, kwargs...)
+save_result(𝒪, 𝒫, dp::DataParams, rp::ReconParams; kwargs...) = save_result(rp.filename, 𝒪, 𝒫; object_name=rp.object_name, probe_name=rp.probe_name, data_params=dp, recon_params=rp, kwargs...)
 
 function crop_center(im, w::Integer, h::Integer)
     m, n = size(im)
@@ -478,7 +480,7 @@ function parameter_sweep(𝒜, dp₀::DataParams, rp₀::ReconParams)
         ptycho_reconstruction!(𝒪, ℴ, 𝒫, 𝒜, rp)
 
         if rp.filename != ""
-            save_result(𝒪, 𝒫, rp; data_params=p)
+            save_result(𝒪, 𝒫, rp; data_params=dp)
         end
 
         phase = angle.(𝒪)
