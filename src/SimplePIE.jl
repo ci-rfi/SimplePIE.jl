@@ -108,10 +108,10 @@ ProbeParams(dp::DataParams) = ProbeParams(dp.convergence_semi_angle, dp.detector
 
 
 @option mutable struct SweepParams
-    sweep_parameter::String="rotation"
-    sweep_mode::String="pct"
-    sweep_range::Vector=collect(1.0:1.0:1.0)
-    sweep_metric::String="std"
+    parameter::String="rotation"
+    mode::String="pct"
+    range::Vector=collect(1.0:1.0:1.0)
+    metric::String="std"
 end
 
 @option mutable struct ReconParams
@@ -126,7 +126,6 @@ end
     filename::String = ""
     object_name::String = ""
     probe_name::String = ""
-    sweep::SweepParams = SweepParams()
 end
 
 function unitAsString(unitOfQuantity::Unitful.FreeUnits) 
@@ -444,73 +443,70 @@ function align_cbeds(cbeds; threshold=0.1, crop=true)
     end
 end
 
-function parameter_sweep(𝒜, dp₀::DataParams, rp₀::ReconParams)
+function parameter_sweep(𝒜, dp₀::DataParams, rp₀::ReconParams, sp₀::SweepParams)
     # preserve original params
-    dp = dp₀
-    rp = rp₀
+    dp = from_dict(DataParams, to_dict(dp₀))
+    rp = from_dict(ReconParams, to_dict(rp₀))
 
-    parameter = rp.sweep.parameter
-    mode = rp.sweep.mode
-    range = rp.sweep.range
-    metric = rp.sweep.metric
-    if parameter ∉ ["rotation", "defocus", "step_size"]
-        @error "$parameter sweep is not implemented. Possible parameters: rotation, defocus, and step_size"
+    if sp₀.parameter ∉ ["rotation", "defocus", "step_size"]
+        @error "$(sp₀.parameter) sweep is not implemented. Possible parameters: rotation, defocus, and step_size"
     end
     
-    if mode ∉ ["pct", "value"]
-        @error "$mode mode is not implemented. Possible modes: pct and value"
+    if sp₀.mode ∉ ["pct", "value"]
+        @error "$(sp₀.mode) mode is not implemented. Possible modes: pct and value"
     end
 
-    if metric ∉ ["std", "max", "min", "mean"]
-        @error "$metric is not one of the implemented metrics. Possible metrics: std, max, min, and mean"
+    if sp₀.metric ∉ ["std", "max", "min", "mean"]
+        @error "$(sp₀.metric) is not one of the implemented metrics. Possible metrics: std, max, min, and mean"
     end
 
-    sweep_result = map(range) do x
-        if parameter == "rotation"
-            δ = mode == "pct" ? dp₀.rotation_angle * x : x
+    sweep_result = map(sp₀.range) do x
+        if sp₀.parameter == "rotation"
+            δ = sp₀.mode == "pct" ? dp₀.rotation_angle * x : x
             dp.rotation_angle = δ
-        elseif parameter == "defocus"
-            δ = mode == "pct" ? dp₀.defocus * x : x
+        elseif sp₀.parameter == "defocus"
+            δ = sp₀.mode == "pct" ? dp₀.defocus * x : x
             dp.defocus = δ
-        elseif parameter == "step_size"
-            δ = mode == "pct" ? dp₀.step_size * x : x
+        elseif sp₀.parameter == "step_size"
+            δ = sp₀.mode == "pct" ? dp₀.step_size * x : x
             dp.step_size = δ
         end
 
-        rp.object_name = join(filter(!isempty, [parameter, mode, string(lpad(ustrip(x), 8, "0"))]), "_")
-        rp.probe_name = join(filter(!isempty, [parameter, mode, string(lpad(ustrip(x), 8, "0"))]), "_")
+        rp.object_name = join(filter(!isempty, [sp₀.parameter, sp₀.mode, string(round(ustrip(x), sigdigits=8))]), "_")
+        rp.probe_name = join(filter(!isempty, [sp₀.parameter, sp₀.mode, string(round(ustrip(x), sigdigits=8))]), "_")
 
         𝒪, ℴ = make_object(dp)
         𝒫 = make_probe(dp)
-        ptycho_reconstruction!(𝒪, ℴ, 𝒫, 𝒜, rp)
+        ptycho_reconstruction!(𝒪, ℴ, 𝒫, 𝒜, rp₀)
 
-        if rp.filename != ""
-            save_result(𝒪, 𝒫, rp; data_params=dp)
+        if rp₀.filename != ""
+            save_result(𝒪, 𝒫, dp, rp₀)
         end
 
         phase = angle.(𝒪)
-        if parameter == "rotation"
+        if sp₀.parameter == "rotation"
             dp.rotation_angle = 0°
             object_size = min(size(first(make_object(dp)))...)
             selection_aperture = circular_aperture(object_size, object_size / 2 - 1)
-            phase = std(selection_aperture .* crop_center(phase, object_size))
+            phase = selection_aperture .* crop_center(phase, object_size)
         end
 
-        if metric == "std"
+        if sp₀.metric == "std"
             result = std(phase)
-        elseif metric == "max"
+        elseif sp₀.metric == "max"
             result = maximum(phase)
-        elseif metric == "min"
+        elseif sp₀.metric == "min"
             result = minimum(phase)
-        elseif metric == "mean"
+        elseif sp₀.metric == "mean"
             result = mean(phase)
         end
 
         return δ, result
     end
 
-    if rp.filename != ""
-        h5write(rp.filename, join("/result", parameter, mode, "sweep"), [ustrip(first.(sweep_result)) last.(sweep_result)])
+    if rp₀.filename != ""
+        h5write(rp₀.filename, join(["sweep_result", sp₀.parameter, sp₀.mode], "_"), [ustrip(first.(sweep_result)) last.(sweep_result)])
+        h5write(rp₀.filename, join(["sweep_params", sp₀.parameter, sp₀.mode], "_"), to_toml(sp₀))
     end
     return sweep_result
 end
