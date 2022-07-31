@@ -51,6 +51,9 @@ export plot_phase
 export save_object
 export save_probe
 export save_result
+export load_object
+export load_probe
+export load_result
 export crop_center
 export cbed_center
 export edge_distance
@@ -236,8 +239,8 @@ function make_probe(α, N, Δf, Δk, Δx, λ, mean_amplitude_sum; data_type=Comp
     𝒫 = AxisArray(𝒫_array; x = (𝒫_min_x:Δx:𝒫_max_x), y = (𝒫_min_y:Δy:𝒫_max_y))
     return 𝒫
 end
-make_probe(pp::ProbeParams; kwargs...) = make_probe(pp.convergence_semi_angle, pp.detector_array_size, pp.defocus, pp.fourier_space_sampling, pp.real_space_sampling, pp.wavelength, pp.amplitude_sum; kwargs...)
-make_probe(dp::DataParams; kwargs...) = make_probe(ProbeParams(dp); kwargs...)
+make_probe(pp::ProbeParams; data_type=ComplexF32) = make_probe(pp.convergence_semi_angle, pp.detector_array_size, pp.defocus, pp.fourier_space_sampling, pp.real_space_sampling, pp.wavelength, pp.amplitude_sum; data_type=data_type)
+make_probe(dp::DataParams; data_type=ComplexF32) = make_probe(ProbeParams(dp); data_type=data_type)
 
 function probe_radius(α, Δf)
     return uconvert(nm, abs(tan(α) * Δf))
@@ -406,6 +409,36 @@ function save_result(filename, 𝒪, 𝒫; object_name="", probe_name=object_nam
 end
 save_result(𝒪, 𝒫, rp::ReconParams; kwargs...) = save_result(rp.filename, 𝒪, 𝒫; object_name=rp.object_name, probe_name=rp.probe_name, recon_params=rp, kwargs...)
 save_result(𝒪, 𝒫, dp::DataParams, rp::ReconParams; kwargs...) = save_result(rp.filename, 𝒪, 𝒫; object_name=rp.object_name, probe_name=rp.probe_name, data_params=dp, recon_params=rp, kwargs...)
+
+function load_object(filename; object_name="", object_params=ObjectParams(), data_type=ComplexF32)
+    if object_params == ObjectParams()
+        object_params = from_dict(ObjectParams, TOML.parse(h5read(filename, join(filter(!isempty, ["/object_params", object_name]), "_"))))
+    end
+    𝒪, ℴ = make_object(object_params; data_type=data_type)
+    𝒪[:] = h5read(filename, join(filter(!isempty, ["/object", object_name]), "_"))
+    return 𝒪, ℴ
+end
+load_object(rp::ReconParams; kwargs...) = load_object(rp.filename; object_name=rp.object_name, kwargs...)
+
+function load_probe(filename; probe_name="", probe_params=ProbeParams(), data_type=ComplexF32)
+    if probe_params == ProbeParams()
+        probe_params = from_dict(ProbeParams, TOML.parse(h5read(filename, join(filter(!isempty, ["/probe_params", probe_name]), "_"))))
+    end
+    𝒫 = make_probe(probe_params; data_type=data_type)
+    𝒫[:] = h5read(filename, join(filter(!isempty, ["/probe", probe_name]), "_"))
+    return 𝒫
+end
+load_probe(rp::ReconParams; kwargs...) = load_probe(rp.filename; probe_name=rp.probe_name, kwargs...)
+
+function load_result(filename; object_name="", probe_name=object_name, data_type=ComplexF32)
+    data_params = from_dict(DataParams, TOML.parse(h5read(filename, join(filter(!isempty, ["/data_params", object_name]), "_"))))
+    recon_params = from_dict(ReconParams, TOML.parse(h5read(filename, join(filter(!isempty, ["/recon_params", object_name]), "_"))))
+    𝒪, ℴ = load_object(filename; object_name=object_name, object_params=ObjectParams(data_params), data_type=data_type)
+    𝒫 = load_probe(filename; probe_name=probe_name, probe_params=ProbeParams(data_params), data_type=data_type)
+    return data_params, recon_params, 𝒪, ℴ, 𝒫
+end
+load_result(rp::ReconParams; kwargs...) = load_result(rp.filename; object_name=rp.object_name, probe_name=rp.probe_name, recon_params=rp, kwargs...)
+load_result(dp::DataParams, rp::ReconParams; kwargs...) = load_result(rp.filename; object_name=rp.object_name, probe_name=rp.probe_name, data_params=dp, recon_params=rp, kwargs...)
 
 function crop_center(im, w::Integer, h::Integer)
     m, n = size(im)
