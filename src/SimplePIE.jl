@@ -510,10 +510,10 @@ function parameter_sweep(𝒜, dp₀::DataParams, rp₀::ReconParams, sp₀::Swe
 
         𝒪, ℴ = make_object(dp)
         𝒫 = make_probe(dp)
-        ptycho_reconstruction!(𝒪, ℴ, 𝒫, 𝒜, rp₀)
+        ptycho_reconstruction!(𝒪, ℴ, 𝒫, 𝒜, rp)
 
-        if rp₀.filename != ""
-            save_result(𝒪, 𝒫, dp, rp₀)
+        if rp.filename != ""
+            save_result(𝒪, 𝒫, dp, rp)
         end
 
         phase = angle.(𝒪)
@@ -537,9 +537,9 @@ function parameter_sweep(𝒜, dp₀::DataParams, rp₀::ReconParams, sp₀::Swe
         return δ, result
     end
 
-    if rp₀.filename != ""
-        h5write(rp₀.filename, join(["sweep_result", sp₀.parameter, sp₀.mode], "_"), [ustrip(first.(sweep_result)) last.(sweep_result)])
-        h5write(rp₀.filename, join(["sweep_params", sp₀.parameter, sp₀.mode], "_"), to_toml(sp₀))
+    if rp.filename != ""
+        h5write(rp.filename, join(["sweep_result", sp₀.parameter, sp₀.mode], "_"), [ustrip(first.(sweep_result)) last.(sweep_result)])
+        h5write(rp.filename, join(["sweep_params", sp₀.parameter, sp₀.mode], "_"), to_toml(sp₀))
     end
     return sweep_result
 end
