@@ -388,17 +388,17 @@ end
 
 function save_object(filename, 𝒪; object_name="", object_params=ObjectParams(), data_type=ComplexF32)
     h5write(filename, join(filter(!isempty, ["/object", object_name]), "_"), convert(Matrix{data_type}, 𝒪))
-    h5write(filename, join(filter(!isempty, ["/object", object_name, "params"]), "_"), to_toml(object_params))
+    h5write(filename, join(filter(!isempty, ["/object_params", object_name]), "_"), to_toml(object_params))
 end
 save_object(𝒪, rp::ReconParams; kwargs...) = save_object(rp.filename, 𝒪; object_name=rp.object_name, kwargs...)
 
 function save_probe(filename, 𝒫; probe_name="", probe_params=ProbeParams(), data_type=ComplexF32)
     h5write(filename, join(filter(!isempty, ["/probe", probe_name]), "_"), convert(Matrix{data_type}, 𝒫))
-    h5write(filename, join(filter(!isempty, ["/probe", probe_name, "params"]), "_"), to_toml(probe_params))
+    h5write(filename, join(filter(!isempty, ["/probe_params", probe_name]), "_"), to_toml(probe_params))
 end
 save_probe(𝒫, rp::ReconParams; kwargs...) = save_probe(rp.filename, 𝒫; probe_name=rp.probe_name, kwargs...)
 
-function save_result(filename, 𝒪, 𝒫; object_name="", probe_name="", data_params=DataParams(), recon_params=ReconParams(), object_params=ObjectParams(data_params), probe_params=ProbeParams(data_params), data_type=ComplexF32)
+function save_result(filename, 𝒪, 𝒫; object_name="", probe_name=object_name, data_params=DataParams(), recon_params=ReconParams(), object_params=ObjectParams(data_params), probe_params=ProbeParams(data_params), data_type=ComplexF32)
     save_object(filename, 𝒪; object_name=object_name, object_params=object_params, data_type=data_type)
     save_probe(filename, 𝒫; probe_name=probe_name, probe_params=probe_params, data_type=data_type)
     h5write(filename, join(filter(!isempty, ["/data_params", object_name]), "_"), to_toml(data_params))
