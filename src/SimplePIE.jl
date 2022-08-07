@@ -34,6 +34,7 @@ export circular_aperture
 export make_grid
 export make_object
 export sum_sqrt_mean
+export scaling_factor
 export make_probe
 export probe_radius
 export probe_area
@@ -216,7 +217,11 @@ function sum_sqrt_mean(cbeds)
     sum(sqrt.(mean(cbeds))) 
 end
 
-function make_probe(α, N, Δf, Δk, Δx, λ, mean_amplitude_sum; data_type=ComplexF32)
+function scaling_factor(cbeds)
+    mean(sqrt.(sum.(cbeds)))
+end
+
+function make_probe(α, N, Δf, Δk, Δx, λ, scaling_factor; data_type=ComplexF32)
     N₁ = first(N)
     N₂ = last(N)
     Δy = Δx
@@ -229,9 +234,10 @@ function make_probe(α, N, Δf, Δk, Δx, λ, mean_amplitude_sum; data_type=Comp
     aberration = -2π/λ * χ 
     aperture = circular_aperture(N, Int(round(α/Δk)); σ=1) 
     𝒟 = cis.(aberration) .* aperture 
-    𝒟 = 𝒟 / sum(abs.(𝒟)) * mean_amplitude_sum
 
     𝒫_array = fftshift(ifft(ifftshift(𝒟))) |> Matrix{data_type}
+    𝒫_array = 𝒫_array / sum(abs.(𝒫_array).^2) * scaling_factor
+
     𝒫_min_x = -0.5(N₁+1) * Δx
     𝒫_max_x = 0.5(N₁-2) * Δx
     𝒫_min_y = -0.5(N₂+1) * Δy
