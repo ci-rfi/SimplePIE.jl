@@ -236,7 +236,7 @@ function make_probe(α, N, Δf, Δk, Δx, λ, scaling_factor; data_type=ComplexF
     𝒟 = cis.(aberration) .* aperture 
 
     𝒫_array = fftshift(ifft(ifftshift(𝒟))) |> Matrix{data_type}
-    𝒫_array = 𝒫_array / sum(abs.(𝒫_array).^2) * scaling_factor
+    𝒫_array = 𝒫_array / sqrt(sum(abs.(𝒫_array).^2)) * scaling_factor
 
     𝒫_min_x = -0.5(N₁+1) * Δx
     𝒫_max_x = 0.5(N₁-2) * Δx
