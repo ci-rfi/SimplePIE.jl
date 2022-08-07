@@ -109,7 +109,6 @@ ObjectParams(dp::DataParams) = ObjectParams(dp.step_size, dp.rotation_angle, dp.
 end
 ProbeParams(dp::DataParams) = ProbeParams(dp.convergence_semi_angle, dp.detector_array_size, dp.defocus, dp.fourier_space_sampling, dp.real_space_sampling, dp.wavelength, dp.scaling_factor)
 
-
 @option mutable struct SweepParams
     parameter::String="rotation"
     mode::String="pct"
@@ -559,7 +558,7 @@ function positions_in_roi(center, positions, r; roi_shape="circle")
 end
 
 function linear_positions(grid, positions)
-    if eltype(first(positions)) == Int
+    if eltype(first(positions)) <: Integer
         map(x -> LinearIndices(grid)[x...], positions)
     else
         map(x -> LinearIndices(grid)[x], findall(!iszero, map(x -> x ∈ positions, grid)))
