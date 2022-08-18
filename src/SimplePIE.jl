@@ -51,6 +51,9 @@ export plot_phase
 export save_object
 export save_probe
 export save_result
+export load_object
+export load_probe
+export load_result
 export crop_center
 export cbed_center
 export edge_distance
@@ -108,10 +111,10 @@ ProbeParams(dp::DataParams) = ProbeParams(dp.convergence_semi_angle, dp.detector
 
 
 @option mutable struct SweepParams
-    sweep_parameter::String="rotation"
-    sweep_mode::String="pct"
-    sweep_range::Vector=collect(1.0:1.0:1.0)
-    sweep_metric::String="std"
+    parameter::String="rotation"
+    mode::String="pct"
+    range::Vector=collect(1.0:1.0:1.0)
+    metric::String="std"
 end
 
 @option mutable struct ReconParams
@@ -126,7 +129,6 @@ end
     filename::String = ""
     object_name::String = ""
     probe_name::String = ""
-    sweep::SweepParams = SweepParams()
 end
 
 function unitAsString(unitOfQuantity::Unitful.FreeUnits) 
@@ -237,8 +239,8 @@ function make_probe(α, N, Δf, Δk, Δx, λ, mean_amplitude_sum; data_type=Comp
     𝒫 = AxisArray(𝒫_array; x = (𝒫_min_x:Δx:𝒫_max_x), y = (𝒫_min_y:Δy:𝒫_max_y))
     return 𝒫
 end
-make_probe(pp::ProbeParams; kwargs...) = make_probe(pp.convergence_semi_angle, pp.detector_array_size, pp.defocus, pp.fourier_space_sampling, pp.real_space_sampling, pp.wavelength, pp.amplitude_sum; kwargs...)
-make_probe(dp::DataParams; kwargs...) = make_probe(ProbeParams(dp); kwargs...)
+make_probe(pp::ProbeParams; data_type=ComplexF32) = make_probe(pp.convergence_semi_angle, pp.detector_array_size, pp.defocus, pp.fourier_space_sampling, pp.real_space_sampling, pp.wavelength, pp.amplitude_sum; data_type=data_type)
+make_probe(dp::DataParams; data_type=ComplexF32) = make_probe(ProbeParams(dp); data_type=data_type)
 
 function probe_radius(α, Δf)
     return uconvert(nm, abs(tan(α) * Δf))
@@ -389,17 +391,17 @@ end
 
 function save_object(filename, 𝒪; object_name="", object_params=ObjectParams(), data_type=ComplexF32)
     h5write(filename, join(filter(!isempty, ["/object", object_name]), "_"), convert(Matrix{data_type}, 𝒪))
-    h5write(filename, join(filter(!isempty, ["/object", object_name, "params"]), "_"), to_toml(object_params))
+    h5write(filename, join(filter(!isempty, ["/object_params", object_name]), "_"), to_toml(object_params))
 end
 save_object(𝒪, rp::ReconParams; kwargs...) = save_object(rp.filename, 𝒪; object_name=rp.object_name, kwargs...)
 
 function save_probe(filename, 𝒫; probe_name="", probe_params=ProbeParams(), data_type=ComplexF32)
     h5write(filename, join(filter(!isempty, ["/probe", probe_name]), "_"), convert(Matrix{data_type}, 𝒫))
-    h5write(filename, join(filter(!isempty, ["/probe", probe_name, "params"]), "_"), to_toml(probe_params))
+    h5write(filename, join(filter(!isempty, ["/probe_params", probe_name]), "_"), to_toml(probe_params))
 end
 save_probe(𝒫, rp::ReconParams; kwargs...) = save_probe(rp.filename, 𝒫; probe_name=rp.probe_name, kwargs...)
 
-function save_result(filename, 𝒪, 𝒫; object_name="", probe_name="", data_params=DataParams(), recon_params=ReconParams(), object_params=ObjectParams(data_params), probe_params=ProbeParams(data_params), data_type=ComplexF32)
+function save_result(filename, 𝒪, 𝒫; object_name="", probe_name=object_name, data_params=DataParams(), recon_params=ReconParams(), object_params=ObjectParams(data_params), probe_params=ProbeParams(data_params), data_type=ComplexF32)
     save_object(filename, 𝒪; object_name=object_name, object_params=object_params, data_type=data_type)
     save_probe(filename, 𝒫; probe_name=probe_name, probe_params=probe_params, data_type=data_type)
     h5write(filename, join(filter(!isempty, ["/data_params", object_name]), "_"), to_toml(data_params))
@@ -407,6 +409,36 @@ function save_result(filename, 𝒪, 𝒫; object_name="", probe_name="", data_p
 end
 save_result(𝒪, 𝒫, rp::ReconParams; kwargs...) = save_result(rp.filename, 𝒪, 𝒫; object_name=rp.object_name, probe_name=rp.probe_name, recon_params=rp, kwargs...)
 save_result(𝒪, 𝒫, dp::DataParams, rp::ReconParams; kwargs...) = save_result(rp.filename, 𝒪, 𝒫; object_name=rp.object_name, probe_name=rp.probe_name, data_params=dp, recon_params=rp, kwargs...)
+
+function load_object(filename; object_name="", object_params=ObjectParams(), data_type=ComplexF32)
+    if object_params == ObjectParams()
+        object_params = from_dict(ObjectParams, TOML.parse(h5read(filename, join(filter(!isempty, ["/object_params", object_name]), "_"))))
+    end
+    𝒪, ℴ = make_object(object_params; data_type=data_type)
+    𝒪[:] = h5read(filename, join(filter(!isempty, ["/object", object_name]), "_"))
+    return 𝒪, ℴ
+end
+load_object(rp::ReconParams; kwargs...) = load_object(rp.filename; object_name=rp.object_name, kwargs...)
+
+function load_probe(filename; probe_name="", probe_params=ProbeParams(), data_type=ComplexF32)
+    if probe_params == ProbeParams()
+        probe_params = from_dict(ProbeParams, TOML.parse(h5read(filename, join(filter(!isempty, ["/probe_params", probe_name]), "_"))))
+    end
+    𝒫 = make_probe(probe_params; data_type=data_type)
+    𝒫[:] = h5read(filename, join(filter(!isempty, ["/probe", probe_name]), "_"))
+    return 𝒫
+end
+load_probe(rp::ReconParams; kwargs...) = load_probe(rp.filename; probe_name=rp.probe_name, kwargs...)
+
+function load_result(filename; object_name="", probe_name=object_name, data_type=ComplexF32)
+    data_params = from_dict(DataParams, TOML.parse(h5read(filename, join(filter(!isempty, ["/data_params", object_name]), "_"))))
+    recon_params = from_dict(ReconParams, TOML.parse(h5read(filename, join(filter(!isempty, ["/recon_params", object_name]), "_"))))
+    𝒪, ℴ = load_object(filename; object_name=object_name, object_params=ObjectParams(data_params), data_type=data_type)
+    𝒫 = load_probe(filename; probe_name=probe_name, probe_params=ProbeParams(data_params), data_type=data_type)
+    return data_params, recon_params, 𝒪, ℴ, 𝒫
+end
+load_result(rp::ReconParams; kwargs...) = load_result(rp.filename; object_name=rp.object_name, probe_name=rp.probe_name, recon_params=rp, kwargs...)
+load_result(dp::DataParams, rp::ReconParams; kwargs...) = load_result(rp.filename; object_name=rp.object_name, probe_name=rp.probe_name, data_params=dp, recon_params=rp, kwargs...)
 
 function crop_center(im, w::Integer, h::Integer)
     m, n = size(im)
@@ -444,65 +476,61 @@ function align_cbeds(cbeds; threshold=0.1, crop=true)
     end
 end
 
-function parameter_sweep(𝒜, dp₀::DataParams, rp₀::ReconParams)
+function parameter_sweep(𝒜, dp₀::DataParams, rp₀::ReconParams, sp₀::SweepParams)
     # preserve original params
-    dp = dp₀
-    rp = rp₀
+    dp = from_dict(DataParams, to_dict(dp₀))
+    rp = from_dict(ReconParams, to_dict(rp₀))
 
-    parameter = rp.sweep.parameter
-    mode = rp.sweep.mode
-    range = rp.sweep.range
-    metric = rp.sweep.metric
-    if parameter ∉ ["rotation", "defocus", "step_size"]
-        @error "$parameter sweep is not implemented. Possible parameters: rotation, defocus, and step_size"
+    if sp₀.parameter ∉ ["rotation", "defocus", "step_size"]
+        @error "$(sp₀.parameter) sweep is not implemented. Possible parameters: rotation, defocus, and step_size"
     end
     
-    if mode ∉ ["pct", "value"]
-        @error "$mode mode is not implemented. Possible modes: pct and value"
+    if sp₀.mode ∉ ["pct", "value"]
+        @error "$(sp₀.mode) mode is not implemented. Possible modes: pct and value"
     end
 
-    if metric ∉ ["std", "max", "min", "mean"]
-        @error "$metric is not one of the implemented metrics. Possible metrics: std, max, min, and mean"
+    if sp₀.metric ∉ ["std", "max", "min", "mean"]
+        @error "$(sp₀.metric) is not one of the implemented metrics. Possible metrics: std, max, min, and mean"
     end
 
-    sweep_result = map(range) do x
-        if parameter == "rotation"
-            δ = mode == "pct" ? dp₀.rotation_angle * x : x
+    sweep_result = map(sp₀.range) do x
+        if sp₀.parameter == "rotation"
+            δ = sp₀.mode == "pct" ? dp₀.rotation_angle * x : x
             dp.rotation_angle = δ
-        elseif parameter == "defocus"
-            δ = mode == "pct" ? dp₀.defocus * x : x
+        elseif sp₀.parameter == "defocus"
+            δ = sp₀.mode == "pct" ? dp₀.defocus * x : x
             dp.defocus = δ
-        elseif parameter == "step_size"
-            δ = mode == "pct" ? dp₀.step_size * x : x
+        elseif sp₀.parameter == "step_size"
+            δ = sp₀.mode == "pct" ? dp₀.step_size * x : x
             dp.step_size = δ
         end
 
-        rp.object_name = join(filter(!isempty, [parameter, mode, string(lpad(ustrip(x), 8, "0"))]), "_")
-        rp.probe_name = join(filter(!isempty, [parameter, mode, string(lpad(ustrip(x), 8, "0"))]), "_")
+        rp.object_name = join(filter(!isempty, [sp₀.parameter, sp₀.mode, string(round(ustrip(x), sigdigits=8))]), "_")
+        rp.probe_name = join(filter(!isempty, [sp₀.parameter, sp₀.mode, string(round(ustrip(x), sigdigits=8))]), "_")
 
         𝒪, ℴ = make_object(dp)
         𝒫 = make_probe(dp)
         ptycho_reconstruction!(𝒪, ℴ, 𝒫, 𝒜, rp)
 
         if rp.filename != ""
-            save_result(𝒪, 𝒫, rp; data_params=dp)
+            save_result(𝒪, 𝒫, dp, rp)
         end
 
         phase = angle.(𝒪)
-        if parameter == "rotation"
+        if sp₀.parameter == "rotation"
             dp.rotation_angle = 0°
             object_size = min(size(first(make_object(dp)))...)
             selection_aperture = circular_aperture(object_size, object_size / 2 - 1)
-            phase = std(selection_aperture .* crop_center(phase, object_size))
+            phase = selection_aperture .* crop_center(phase, object_size)
         end
 
-        if metric == "std"
+        if sp₀.metric == "std"
             result = std(phase)
-        elseif metric == "max"
+        elseif sp₀.metric == "max"
             result = maximum(phase)
-        elseif metric == "min"
+        elseif sp₀.metric == "min"
             result = minimum(phase)
-        elseif metric == "mean"
+        elseif sp₀.metric == "mean"
             result = mean(phase)
         end
 
@@ -510,7 +538,8 @@ function parameter_sweep(𝒜, dp₀::DataParams, rp₀::ReconParams)
     end
 
     if rp.filename != ""
-        h5write(rp.filename, join("/result", parameter, mode, "sweep"), [ustrip(first.(sweep_result)) last.(sweep_result)])
+        h5write(rp.filename, join(["sweep_result", sp₀.parameter, sp₀.mode], "_"), [ustrip(first.(sweep_result)) last.(sweep_result)])
+        h5write(rp.filename, join(["sweep_params", sp₀.parameter, sp₀.mode], "_"), to_toml(sp₀))
     end
     return sweep_result
 end
