@@ -1,0 +1,7 @@
+convergence_semi_angle = [1.034, "mrad"]
+detector_array_size = [256, 256]
+defocus = [-13000.0, "nm"]
+fourier_space_sampling = [0.016544, "mrad"]
+real_space_sampling = [4.648467967582377, "Å"]
+wavelength = [0.001968748903825481, "nm"]
+amplitude_sum = 47317.77435855447
