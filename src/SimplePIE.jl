@@ -33,7 +33,7 @@ export wavelength
 export circular_aperture
 export make_grid
 export make_object
-export sum_sqrt_mean
+export probe_scaling_factor
 export make_probe
 export probe_radius
 export probe_area
@@ -86,7 +86,7 @@ export linear_positions
     probe_area::typeof(1.0nm^2) = 0.0nm^2
     overlap::typeof(1.0nm^2) = 0.0nm^2
     overlap_ratio::typeof(1.0u"percent") = 0.0u"percent"
-    amplitude_sum::Float64 = 0
+    scaling_factor::Float64 = 1.0
 end
 
 @option mutable struct ObjectParams
@@ -105,9 +105,9 @@ ObjectParams(dp::DataParams) = ObjectParams(dp.step_size, dp.rotation_angle, dp.
     fourier_space_sampling::typeof(1.0mrad) = 0.0mrad
     real_space_sampling::typeof(1.0Å) = 0.0Å
     wavelength::typeof(1.0nm) = 0.0nm
-    amplitude_sum::Float64 = 0
+    scaling_factor::Float64 = 1.0
 end
-ProbeParams(dp::DataParams) = ProbeParams(dp.convergence_semi_angle, dp.detector_array_size, dp.defocus, dp.fourier_space_sampling, dp.real_space_sampling, dp.wavelength, dp.amplitude_sum)
+ProbeParams(dp::DataParams) = ProbeParams(dp.convergence_semi_angle, dp.detector_array_size, dp.defocus, dp.fourier_space_sampling, dp.real_space_sampling, dp.wavelength, dp.scaling_factor)
 
 
 @option mutable struct SweepParams
@@ -212,11 +212,11 @@ end
 make_object(op::ObjectParams; data_type=ComplexF32, kwargs...) = make_object(make_grid(op.step_size, op.rotation_angle, op.scan_array_size; kwargs...), op.detector_array_size, op.real_space_sampling; data_type=data_type)
 make_object(dp::DataParams; data_type=ComplexF32, kwargs...) = make_object(ObjectParams(dp); data_type=data_type, kwargs...)
 
-function sum_sqrt_mean(cbeds)
-    sum(sqrt.(mean(cbeds))) 
+function probe_scaling_factor(cbed_ref)
+    sum(cbed_ref) / prod(size(cbed_ref))
 end
 
-function make_probe(α, N, Δf, Δk, Δx, λ, mean_amplitude_sum; data_type=ComplexF32)
+function make_probe(α, N, Δf, Δk, Δx, λ, scaling_factor; data_type=ComplexF32)
     N₁ = first(N)
     N₂ = last(N)
     Δy = Δx
@@ -229,9 +229,10 @@ function make_probe(α, N, Δf, Δk, Δx, λ, mean_amplitude_sum; data_type=Comp
     aberration = -2π/λ * χ 
     aperture = circular_aperture(N, Int(round(α/Δk)); σ=1) 
     𝒟 = cis.(aberration) .* aperture 
-    𝒟 = 𝒟 / sum(abs.(𝒟)) * mean_amplitude_sum
+    𝒟 = 𝒟 / sum(abs.(𝒟))
+    𝒫_array = fftshift(ifft(ifftshift(𝒟)))
+    𝒫_array = 𝒫_array * √(scaling_factor / sum(abs.(𝒫_array).^2)) |> Matrix{data_type}
 
-    𝒫_array = fftshift(ifft(ifftshift(𝒟))) |> Matrix{data_type}
     𝒫_min_x = -0.5(N₁+1) * Δx
     𝒫_max_x = 0.5(N₁-2) * Δx
     𝒫_min_y = -0.5(N₂+1) * Δy
@@ -239,7 +240,7 @@ function make_probe(α, N, Δf, Δk, Δx, λ, mean_amplitude_sum; data_type=Comp
     𝒫 = AxisArray(𝒫_array; x = (𝒫_min_x:Δx:𝒫_max_x), y = (𝒫_min_y:Δy:𝒫_max_y))
     return 𝒫
 end
-make_probe(pp::ProbeParams; data_type=ComplexF32) = make_probe(pp.convergence_semi_angle, pp.detector_array_size, pp.defocus, pp.fourier_space_sampling, pp.real_space_sampling, pp.wavelength, pp.amplitude_sum; data_type=data_type)
+make_probe(pp::ProbeParams; data_type=ComplexF32) = make_probe(pp.convergence_semi_angle, pp.detector_array_size, pp.defocus, pp.fourier_space_sampling, pp.real_space_sampling, pp.wavelength, pp.scaling_factor; data_type=data_type)
 make_probe(dp::DataParams; data_type=ComplexF32) = make_probe(ProbeParams(dp); data_type=data_type)
 
 function probe_radius(α, Δf)
@@ -318,21 +319,23 @@ function update!(q, a, Δψ; method="ePIE", α=0.2)
     return nothing
 end
 
-function ptycho_iteration!(𝒪, 𝒫, 𝒜; method="ePIE", α=0.2, β=0.2)
+function ptycho_iteration!(𝒪, 𝒫, 𝒜; method="ePIE", α=0.2, β=0.2, scaling_factor=1.0)
     ψ₁ = 𝒪 .* 𝒫
     𝒟 = 𝒜 .* sign.(fft(ψ₁))
     ψ₂ = ifft(𝒟)
     Δψ = ψ₂ - ψ₁
+    scaling_factor = convert(eltype(real(𝒫)), scaling_factor)
+    𝒫[:] = 𝒫 * √(scaling_factor / sum(abs.(𝒫).^2))
     update!(𝒪, 𝒫, Δψ; method=method, α=α)
     update!(𝒫, 𝒪, Δψ; method=method, α=β)
     return nothing
 end
 
-function gpu_ptycho_iteration!(𝒪_cpu, 𝒫_cpu, 𝒜_cpu; method="ePIE", α::Float32=Float32(0.2), β::Float32=Float32(0.2))
+function gpu_ptycho_iteration!(𝒪_cpu, 𝒫_cpu, 𝒜_cpu; method="ePIE", α::Float32=Float32(0.2), β::Float32=Float32(0.2), scaling_factor=1.0)
     𝒪 = CuArray(copy(𝒪_cpu.data))
     𝒫 = CuArray(copy(𝒫_cpu.data))
     𝒜 = CuArray(𝒜_cpu)
-    ptycho_iteration!(𝒪, 𝒫, 𝒜; method=method, α=α, β=β)
+    ptycho_iteration!(𝒪, 𝒫, 𝒜; method=method, α=α, β=β, scaling_factor=scaling_factor)
     copyto!(𝒪_cpu, Array(𝒪))
     copyto!(𝒫_cpu, Array(𝒫))
     return nothing
@@ -362,17 +365,17 @@ function plot_wave(𝒲; unwrap_phase=false, with_unit=true, kwargs...)
     return plot(p1, p2, layout=(1,2))
 end
 
-function ptycho_reconstruction!(𝒪, ℴ, 𝒫, 𝒜; method="ePIE", ni=1, α=Float32(0.01), β=Float32(0.01), GPUs::Vector{Int}=Int[], plotting=false)
+function ptycho_reconstruction!(𝒪, ℴ, 𝒫, 𝒜; method="ePIE", ni=1, α=Float32(0.01), β=Float32(0.01), scaling_factor=1.0, GPUs::Vector{Int}=Int[], plotting=false)
     ngpu = length(GPUs)
     for _ in 1:ni
         @time if ngpu == 0
             Threads.@threads for i in shuffle(eachindex(𝒜))
-                ptycho_iteration!(ℴ[i], 𝒫, 𝒜[i]; method=method, α=α, β=β)
+                ptycho_iteration!(ℴ[i], 𝒫, 𝒜[i]; method=method, α=α, β=β, scaling_factor=scaling_factor)
             end
         else 
             Threads.@threads for i in shuffle(eachindex(𝒜))
                 CUDA.device!(GPUs[i % ngpu + 1])
-                gpu_ptycho_iteration!(ℴ[i], 𝒫, 𝒜[i]; method=method, α=α, β=β)
+                gpu_ptycho_iteration!(ℴ[i], 𝒫, 𝒜[i]; method=method, α=α, β=β, scaling_factor=scaling_factor)
             end
         end
 
@@ -384,9 +387,9 @@ function ptycho_reconstruction!(𝒪, ℴ, 𝒫, 𝒜; method="ePIE", ni=1, α=F
     return nothing
 end
 
-function ptycho_reconstruction!(𝒪, ℴ, 𝒫, 𝒜, rp::ReconParams)
+function ptycho_reconstruction!(𝒪, ℴ, 𝒫, 𝒜, dp::DataParams, rp::ReconParams)
     ni = length(range(rp.iteration_start, rp.iteration_end))
-    ptycho_reconstruction!(𝒪, ℴ, 𝒫, 𝒜; method=rp.method, ni=ni, α=rp.alpha, β=rp.beta, GPUs=rp.GPUs, plotting=rp.plotting)
+    ptycho_reconstruction!(𝒪, ℴ, 𝒫, 𝒜; method=rp.method, ni=ni, α=rp.alpha, β=rp.beta, scaling_factor=dp.scaling_factor, GPUs=rp.GPUs, plotting=rp.plotting)
 end
 
 function save_object(filename, 𝒪; object_name="", object_params=ObjectParams(), data_type=ComplexF32)
@@ -510,7 +513,7 @@ function parameter_sweep(𝒜, dp₀::DataParams, rp₀::ReconParams, sp₀::Swe
 
         𝒪, ℴ = make_object(dp)
         𝒫 = make_probe(dp)
-        ptycho_reconstruction!(𝒪, ℴ, 𝒫, 𝒜, rp)
+        ptycho_reconstruction!(𝒪, ℴ, 𝒫, 𝒜, dp, rp)
 
         if rp.filename != ""
             save_result(𝒪, 𝒫, dp, rp)
