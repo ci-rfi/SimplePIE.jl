@@ -287,7 +287,7 @@ function load_mib(filename)
 end
 
 function make_amplitude(cbeds; data_type=Float32) 
-    ThreadsX.map(x -> fftshift(sqrt.(x))|> Matrix{data_type}, cbeds)
+    ThreadsX.map(x -> ifftshift(sqrt.(x))|> Matrix{data_type}, cbeds)
 end
 
 function update!(q, a, Δψ; method="ePIE", α=0.2) 
@@ -321,8 +321,8 @@ end
 
 function ptycho_iteration!(𝒪, 𝒫, 𝒜; method="ePIE", α=0.2, β=0.2, scaling_factor=1.0)
     ψ₁ = 𝒪 .* 𝒫
-    𝒟 = 𝒜 .* sign.(fft(ψ₁))
-    ψ₂ = ifft(𝒟)
+    𝒟 = 𝒜 .* sign.(fft(ifftshift(ψ₁)))
+    ψ₂ = fftshift(ifft(𝒟))
     Δψ = ψ₂ - ψ₁
     scaling_factor = convert(eltype(real(𝒫)), scaling_factor)
     𝒫[:] = 𝒫 * √(scaling_factor / sum(abs.(𝒫).^2))
