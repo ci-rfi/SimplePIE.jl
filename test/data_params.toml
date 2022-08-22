@@ -17,4 +17,4 @@ probe_radius = [13.442004790533698, "nm"]
 probe_area = [567.6464999406356, "nm^2"]
 overlap = [483.8235481851592, "nm^2"]
 overlap_ratio = [85.23324784628416, "%"]
-amplitude_sum = 47317.77435855447
+scaling_factor = 47317.77435855447

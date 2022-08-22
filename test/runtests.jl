@@ -25,11 +25,11 @@ using Test
     rₚ = probe_radius(α, Δf)
     sₚ = probe_area(α, Δf)
     overlap, overlap_ratio = probe_overlap(rₚ, dₛ; ratio=true)
-    𝒜sum = 47317.77435855447
+    scaling_factor = 47317.77435855447
 
-    data_params = DataParams(project, session, datadir, datafile, timestamp, N, n, λ, α, Δk, θ, θᵣ, dₛ, Δx, Δf, rₚ, sₚ, overlap, overlap_ratio, 𝒜sum)
+    data_params = DataParams(project, session, datadir, datafile, timestamp, N, n, λ, α, Δk, θ, θᵣ, dₛ, Δx, Δf, rₚ, sₚ, overlap, overlap_ratio, scaling_factor)
     object_params = ObjectParams(dₛ, θᵣ, n, N, Δx)
-    probe_params = ProbeParams(α, N, Δf, Δk, Δx, λ, 𝒜sum) 
+    probe_params = ProbeParams(α, N, Δf, Δk, Δx, λ, scaling_factor) 
 
     data_params_from_toml = from_toml(DataParams, "data_params.toml")
     object_params_from_toml = from_toml(ObjectParams, "object_params.toml")
