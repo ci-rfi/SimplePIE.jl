@@ -326,11 +326,11 @@ function ptycho_iteration!(𝒪, 𝒫, 𝒜; method="ePIE", α=0.2, β=0.2, prob
     𝒻ₚ = convert(eltype(real(𝒫)), √probe_power)
 
     ψ₁ = 𝒪 .* 𝒫
-    𝒟 = 𝒜 / 𝒻ₜ .* sign.(fft(ifftshift(ψ₁)))
-    ψ₂ = fftshift(ifft(𝒟)) * 𝒻ₜ
+    𝒟 = 𝒜 .* sign.(fft(ifftshift(ψ₁)))
+    ψ₂ = fftshift(ifft(𝒟 * 𝒻ₜ))
     Δψ = ψ₂ - ψ₁
 
-    𝒫[:] = 𝒫 * 𝒻ₚ / 𝒻ₜ / √sum(abs.(𝒫).^2)
+    𝒫[:] = 𝒫 * 𝒻ₚ / √sum(abs.(𝒫).^2)
     update!(𝒪, 𝒫, Δψ; method=method, α=α)
     update!(𝒫, 𝒪, Δψ; method=method, α=β)
     return nothing
