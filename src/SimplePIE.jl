@@ -48,6 +48,9 @@ export plot_wave
 export ptycho_reconstruction!
 export plot_amplitude
 export plot_phase
+export amplitude_image
+export phase_image
+export wave_image
 export save_object
 export save_probe
 export save_result
@@ -362,6 +365,21 @@ function plot_wave(𝒲; unwrap_phase=false, with_unit=true, kwargs...)
     p1 = plot_amplitude(𝒲; with_unit=with_unit, kwargs...)
     p2 = plot_phase(𝒲; unwrap_phase=unwrap_phase, with_unit=with_unit, kwargs...)
     return plot(p1, p2, layout=(1,2))
+end
+
+function amplitude_image(𝒲)
+    amplitude = abs.(𝒲)
+    return colorview(Gray, amplitude/maximum(amplitude))
+end
+
+function phase_image(𝒲; unwrap_phase=false)
+    phase = unwrap_phase ? unwrap(angle.(𝒲); dims=1:2) : angle.(𝒲)
+    phase = phase .- minimum(phase)
+    return colorview(Gray, phase/maximum(phase))
+end
+
+function wave_image(𝒲; unwrap_phase=false)
+    return amplitude_image(𝒲), phase_image(𝒲; unwrap_phase=unwrap_phase)
 end
 
 function ptycho_reconstruction!(𝒪, ℴ, 𝒫, 𝒜; method="ePIE", ni=1, α=Float32(0.01), β=Float32(0.01), scaling_factor=1.0, GPUs::Vector{Int}=Int[], plotting=false)
