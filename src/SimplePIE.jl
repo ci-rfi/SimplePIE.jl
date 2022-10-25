@@ -41,6 +41,7 @@ export probe_overlap
 export load_cbeds
 export load_mat
 export load_mib
+export load_h5
 export make_amplitude
 export ptycho_iteration!
 export gpu_ptycho_iteration!
@@ -261,7 +262,7 @@ function probe_overlap(rₚ, dₛ; ratio=false)
     return ratio ? (overlap_area, overlap_ratio) : overlap_area
 end
 
-function load_cbeds(f, filename::String; quadrant=0, align=false, threshold=0.1, crop=true)
+function load_cbeds(f, filename; quadrant=0, align=false, threshold=0.1, crop=true)
     cbeds = f(filename)
     if quadrant ∈ [1, 2, 3, 4]
         l₁, l₂ = Int.(round.(size(first(cbeds)) ./ 2)) 
@@ -272,10 +273,23 @@ function load_cbeds(f, filename::String; quadrant=0, align=false, threshold=0.1,
 end
 load_cbeds(filename; kwargs...) = load_cbeds(x->load_mat(x), filename; kwargs...)
 
-# function load_h5(filename)
-#     cbeds = h5read(filename, "dps")
-#     return cbeds
-# end
+function load_h5(filenames::Vector{String})
+    all_keys = map(filenames) do filename
+        h5open(filename) do fid
+        group_keys = keys(fid)
+        image_keys = [keys(fid[k]) for k in group_keys]
+        key_pairs = zip(group_keys, image_keys)
+        [map(x -> [filename, kp[1], x], filter(x -> x[1:5] == "image", kp[2])) for kp in key_pairs]
+        end
+    end |> x -> vcat(vcat(x...)...)
+    img_indices = all_keys .|> x -> parse(Int, replace(x[2], r".*_" => "") * replace(x[3], r".*_" => ""))
+    all_keys = all_keys[img_indices .> 0]
+    img_indices = img_indices[img_indices .> 0]
+    sortvec = sortperm(img_indices[img_indices .> 0 ])
+    all_keys_sorted = all_keys[sortvec]
+    map(x -> h5read(x[1], "/"*x[2]*"/"*x[3]), all_keys_sorted)
+end
+load_h5(filename::String) = load_h5([filename])
 
 function load_mat(filename)
     mat = matread(filename)["dps"]
