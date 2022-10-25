@@ -369,6 +369,7 @@ end
 
 function amplitude_image(𝒲)
     amplitude = abs.(𝒲)
+    amplitude = amplitude .- minimum(amplitude)
     return colorview(Gray, amplitude/maximum(amplitude))
 end
 
