@@ -33,6 +33,7 @@ export wavelength
 export circular_aperture
 export make_grid
 export make_object
+export merge_object
 export probe_scaling_factor
 export make_probe
 export probe_radius
@@ -214,6 +215,45 @@ function make_object(grid, N, Δx; data_type=ComplexF32)
 end
 make_object(op::ObjectParams; data_type=ComplexF32, kwargs...) = make_object(make_grid(op.step_size, op.rotation_angle, op.scan_array_size; kwargs...), op.detector_array_size, op.real_space_sampling; data_type=data_type)
 make_object(dp::DataParams; data_type=ComplexF32, kwargs...) = make_object(ObjectParams(dp); data_type=data_type, kwargs...)
+
+function merge_object(𝒪s, ℴs, offsets; edge_width::Int=0, data_type=ComplexF32)
+    steps = map(x -> step.(x.axes), 𝒪s)
+    @assert all(==(steps[1]), steps)
+    Δx, Δy = step.(first(𝒪s).axes)
+
+    axes_endpoints = map((x,y) -> (first.(x.axes) .+ y, last.(x.axes) .+ y), 𝒪s, offsets)
+    𝒪_min_x = minimum(x -> x[1][1], axes_endpoints)
+    𝒪_min_y = minimum(x -> x[1][2], axes_endpoints)
+    𝒪_max_x = maximum(x -> x[2][1], axes_endpoints)
+    𝒪_max_y = maximum(x -> x[2][2], axes_endpoints)
+
+    nx = length(𝒪_min_x:Δx:𝒪_max_x)
+    ny = length(𝒪_min_y:Δy:𝒪_max_y)
+
+    𝒪 = AxisArray(ones(data_type, nx, ny); x = (𝒪_min_x:Δx:𝒪_max_x), y = (𝒪_min_y:Δy:𝒪_max_y))
+    centers = map(ℴs, offsets) do ℴ, offset
+            return map(x -> mean((first.(x.axes) .+ offset, last.(x.axes) .+ offset)), ℴ)
+        end |> x -> hcat(x...)
+
+    ℴ_sizes = hcat(map(x -> size.(x), ℴs)...)
+    @assert all(==(ℴ_sizes[1]), ℴ_sizes)
+    N₁, N₂ = size(ℴs[1][1])
+    ℴ = map(centers) do p
+        x1 = p[1] - Δx*N₁/2
+        x2 = p[1] + Δx*N₁/2
+        y1 = p[2] - Δy*N₂/2
+        y2 = p[2] + Δy*N₂/2
+        view(𝒪, x1 .. x2, y1 .. y2)
+    end
+
+    Δr::Int = edge_width != 0 ? edge_width / 2 : round(euclidean(centers[1], centers[2]) / Δx)
+    r₀::Int = N₁ / 2 
+
+    map(ℴ, hcat(ℴs...)) do ℴ_new, ℴ_old
+        ℴ_new[r₀-Δr:1r₀+Δr, r₀-Δr:1r₀+Δr] = ℴ_old[r₀-Δr:1r₀+Δr, r₀-Δr:1r₀+Δr]
+    end
+    return 𝒪, ℴ
+end
 
 function probe_scaling_factor(cbed_ref)
     sum(cbed_ref) / prod(size(cbed_ref))
