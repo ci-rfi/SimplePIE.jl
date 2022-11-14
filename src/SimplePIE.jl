@@ -248,7 +248,7 @@ function merge_object(𝒪s, ℴs, offsets; edge_width::Int=0, data_type=Complex
         view(𝒪, x1 .. x2, y1 .. y2)
     end
 
-    Δr::Int = edge_width != 0 ? edge_width / 2 : round(euclidean(centers[1], centers[2]) / Δx)
+    Δr::Int = edge_width != 0 ? ceil(edge_width / 2) : round(0.6 * euclidean(centers[1], centers[2]) / Δx)
     r₀::Int = N₁ / 2 
 
     map(vec(ℴ), vcat(vec.(ℴs)...)) do ℴ_new, ℴ_old
