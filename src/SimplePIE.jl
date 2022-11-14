@@ -222,21 +222,18 @@ function merge_object(𝒪s, ℴs, offsets; edge_width::Int=0, data_type=Complex
     @assert all(==(steps[1]), steps)
     Δx, Δy = step.(first(𝒪s).axes)
 
-    axes_endpoints = map((x,y) -> (first.(x.axes) .+ y, last.(x.axes) .+ y), 𝒪s, offsets)
-    𝒪_min_x = minimum(x -> x[1][1], axes_endpoints)
-    𝒪_min_y = minimum(x -> x[1][2], axes_endpoints)
-    𝒪_max_x = maximum(x -> x[2][1], axes_endpoints)
-    𝒪_max_y = maximum(x -> x[2][2], axes_endpoints)
+    𝒪_centers = map(x -> mean.(extrema.(x.axes)), 𝒪s)
+    axes_endpoints = map((x,y,z) -> (first.(x.axes) .- y .+ z, last.(x.axes) .- y .+ z), 𝒪s, 𝒪_centers, offsets)
 
     nx = length(𝒪_min_x:Δx:𝒪_max_x)
     ny = length(𝒪_min_y:Δy:𝒪_max_y)
 
     𝒪 = AxisArray(ones(data_type, nx, ny); x = (𝒪_min_x:Δx:𝒪_max_x), y = (𝒪_min_y:Δy:𝒪_max_y))
-    centers = map(ℴs, offsets) do ℴ, offset
-            return map(x -> mean((first.(x.axes) .+ offset, last.(x.axes) .+ offset)), ℴ)
-        end |> x -> hcat(x...)
+    centers = map(ℴs, 𝒪_centers, offsets) do ℴ, c, offset
+            return map(x -> mean((first.(x.axes) .- c .+ offset, last.(x.axes) .- c .+ offset)), ℴ)
+        end |> x -> vcat(vec.(x)...)
 
-    ℴ_sizes = hcat(map(x -> size.(x), ℴs)...)
+    ℴ_sizes = vcat(map(x -> size.(vec(x)), ℴs)...)
     @assert all(==(ℴ_sizes[1]), ℴ_sizes)
     N₁, N₂ = size(ℴs[1][1])
     ℴ = map(centers) do p
@@ -250,7 +247,7 @@ function merge_object(𝒪s, ℴs, offsets; edge_width::Int=0, data_type=Complex
     Δr::Int = edge_width != 0 ? edge_width / 2 : round(euclidean(centers[1], centers[2]) / Δx)
     r₀::Int = N₁ / 2 
 
-    map(ℴ, hcat(ℴs...)) do ℴ_new, ℴ_old
+    map(vec(ℴ), vcat(vec.(ℴs)...)) do ℴ_new, ℴ_old
         ℴ_new[r₀-Δr:1r₀+Δr, r₀-Δr:1r₀+Δr] = ℴ_old[r₀-Δr:1r₀+Δr, r₀-Δr:1r₀+Δr]
     end
     return 𝒪, ℴ
