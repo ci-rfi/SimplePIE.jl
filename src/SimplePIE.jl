@@ -4,6 +4,7 @@ using Configurations
 using TOML
 using Unitful
 using Unitful: Å, nm, μm, °, kV, mrad
+using Rotations
 using MAT
 using Statistics: mean
 using FFTW
@@ -172,7 +173,7 @@ end
 function make_grid(dₛ, θᵣ, n; offset=[zero(dₛ), zero(dₛ)])
     n₁ = first(n)
     n₂ = last(n)
-    init_grid = [[(cos(θᵣ)j - sin(θᵣ)i)dₛ, (cos(θᵣ)i + sin(θᵣ)j)dₛ] for (i,j) in product(1:n₁, 1:n₂)]
+    init_grid = [RotMatrix{2}(θᵣ) * [i,j] * dₛ for (i,j) in product(1:n₁, 1:n₂)]
     min_x = minimum(first, init_grid)
     min_y = minimum(last, init_grid)
     grid = map(init_grid) do p
@@ -343,7 +344,7 @@ function load_mib(filename)
 end
 
 function make_amplitude(cbeds; data_type=Float32) 
-    ThreadsX.map(x -> ifftshift(sqrt.(x))|> Matrix{data_type}, cbeds)
+    ThreadsX.map(x -> ifftshift(sqrt.(transpose(x)))|> Matrix{data_type}, cbeds)
 end
 
 function update!(q, a, Δψ; method="ePIE", α=0.2) 
