@@ -35,6 +35,7 @@ export circular_aperture
 export make_grid
 export make_object
 export divide_object
+export get_edge_index
 export merge_object
 export probe_scaling_factor
 export make_probe
@@ -240,6 +241,13 @@ function divide_object(data_params, component_matrix)
     ℴs = last.(𝒪_ℴ)
     return 𝒪s, ℴs, offsets, ℴ_ind, 𝓅
 end
+
+function get_edge_index(component_matrix)
+    edge_mat = (magnitude(imgradients(component_matrix, KernelFactors.ando3)...)) .≠ 0
+    edge_index = findall(==(true), vec(edge_mat))
+    return edge_index
+end
+
 function merge_object(𝒪s, ℴs, offsets; edge_width::Int=0, data_type=ComplexF32)
     steps = map(x -> step.(x.axes), 𝒪s)
     @assert all(==(steps[1]), steps)
