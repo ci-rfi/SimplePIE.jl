@@ -34,6 +34,7 @@ export wavelength
 export circular_aperture
 export make_grid
 export make_object
+export divide_object
 export merge_object
 export probe_scaling_factor
 export make_probe
@@ -217,6 +218,28 @@ end
 make_object(op::ObjectParams; data_type=ComplexF32, kwargs...) = make_object(make_grid(op.step_size, op.rotation_angle, op.scan_array_size; kwargs...), op.detector_array_size, op.real_space_sampling; data_type=data_type)
 make_object(dp::DataParams; data_type=ComplexF32, kwargs...) = make_object(ObjectParams(dp); data_type=data_type, kwargs...)
 
+function divide_object(data_params, component_matrix)
+    𝓅 = map(x -> findall(==(x), component_matrix), unique(component_matrix))
+    corners = extrema.(𝓅)
+    ℴ_ind = map(x -> [i - first.(corners)[x[1]] + first(first.(corners)) for i in x[2]], enumerate(𝓅)) 
+    θᵣ = data_params.rotation_angle
+    dₛ = data_params.step_size
+    offsets = map(corners) do x
+        center_index = mean(collect.(getfield.(x, :I)))
+        RotMatrix{2}(θᵣ) * center_index * dₛ
+    end
+
+    𝒪_ℴ = map(corners, offsets) do c, offset
+        n = collect(size(range(c...)))
+        dp=deepcopy(data_params)
+        dp.scan_array_size = n
+        𝒪, ℴ = make_object(dp; offset=offset)
+        return 𝒪, ℴ
+    end
+    𝒪s = first.(𝒪_ℴ)
+    ℴs = last.(𝒪_ℴ)
+    return 𝒪s, ℴs, offsets, ℴ_ind, 𝓅
+end
 function merge_object(𝒪s, ℴs, offsets; edge_width::Int=0, data_type=ComplexF32)
     steps = map(x -> step.(x.axes), 𝒪s)
     @assert all(==(steps[1]), steps)
