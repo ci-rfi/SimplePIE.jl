@@ -224,6 +224,10 @@ function merge_object(𝒪s, ℴs, offsets; edge_width::Int=0, data_type=Complex
 
     𝒪_centers = map(x -> mean.(extrema.(x.axes)), 𝒪s)
     axes_endpoints = map((x,y,z) -> (first.(x.axes) .- y .+ z, last.(x.axes) .- y .+ z), 𝒪s, 𝒪_centers, offsets)
+    𝒪_min_x = minimum(x -> x[1][1], axes_endpoints) - 0.25Δx
+    𝒪_min_y = minimum(x -> x[1][2], axes_endpoints) - 0.25Δy
+    𝒪_max_x = maximum(x -> x[2][1], axes_endpoints) + 0.25Δx
+    𝒪_max_y = maximum(x -> x[2][2], axes_endpoints) + 0.25Δy
 
     nx = length(𝒪_min_x:Δx:𝒪_max_x)
     ny = length(𝒪_min_y:Δy:𝒪_max_y)
