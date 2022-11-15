@@ -442,7 +442,7 @@ end
 function plot_phase(𝒲; unwrap_phase=false, with_unit=true, kwargs...)
     phase = unwrap_phase ? unwrap(angle.(𝒲); dims=1:2) : angle.(𝒲)
     if with_unit
-        return heatmap(phase; aspect_ratio=:equal, xlim=(1, size(phase, 1)), ylim=(1, size(phase, 2)), xrotation=-20, xformatter= x -> stringround(typeof(1nm), 𝒲.axes[1][Int(x)])), yformatter= y -> string(round(typeof(1nm), 𝒲.axes[2][Int(y)])), kwargs...)
+        return heatmap(phase; aspect_ratio=:equal, xlim=(1, size(phase, 1)), ylim=(1, size(phase, 2)), xrotation=-20, xformatter= x -> string(round(typeof(1nm), 𝒲.axes[1][Int(x)])), yformatter= y -> string(round(typeof(1nm), 𝒲.axes[2][Int(y)])), kwargs...)
     else
         return heatmap(phase; aspect_ratio=:equal)
     end
