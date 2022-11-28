@@ -349,18 +349,16 @@ load_cbeds(filename; kwargs...) = load_cbeds(x->load_mat(x), filename; kwargs...
 function load_h5(filenames::Vector{String})
     all_keys = map(filenames) do filename
         h5open(filename) do fid
-        group_keys = keys(fid)
-        image_keys = [keys(fid[k]) for k in group_keys]
-        key_pairs = zip(group_keys, image_keys)
-        [map(x -> [filename, kp[1], x], filter(x -> x[1:5] == "image", kp[2])) for kp in key_pairs]
+        ks = keys(fid)
+        map(k -> [filename,  k], filter(k -> k[1:5] == "image", ks))
         end
-    end |> x -> vcat(vcat(x...)...)
-    img_indices = all_keys .|> x -> parse(Int, replace(x[2], r".*_" => "") * replace(x[3], r".*_" => ""))
+    end |> x -> vcat(x...)
+    img_indices = all_keys .|> x -> parse(Int, replace(x[2], r".*_" => ""))
     all_keys = all_keys[img_indices .> 0]
     img_indices = img_indices[img_indices .> 0]
     sortvec = sortperm(img_indices[img_indices .> 0 ])
     all_keys_sorted = all_keys[sortvec]
-    map(x -> h5read(x[1], "/"*x[2]*"/"*x[3]), all_keys_sorted)
+    map(x -> h5read(x[1], "/"*x[2]), all_keys_sorted)
 end
 load_h5(filename::String) = load_h5([filename])
 
