@@ -19,6 +19,7 @@ using CUDA
 using BenchmarkTools
 using HDF5
 using Medipix
+using SubpixelRegistration
 
 import Configurations.from_dict
 import Configurations.to_dict
@@ -335,14 +336,14 @@ function probe_overlap(rₚ, dₛ; ratio=false)
     return ratio ? (overlap_area, overlap_ratio) : overlap_area
 end
 
-function load_cbeds(f, filename; quadrant=0, align=false, threshold=0.1, crop=true)
+function load_cbeds(f, filename; quadrant=0, align=false, subpixel=false, threshold=0.1, crop=true)
     cbeds = f(filename)
     if quadrant ∈ [1, 2, 3, 4]
         l₁, l₂ = Int.(round.(size(first(cbeds)) ./ 2)) 
         ranges = [[l₁+1:2l₁, l₂+1:2l₂], [1:l₁, l₂+1:2l₂], [1:l₁, 1:l₂], [l₁+1:2l₁, 1:l₂]]
         cbeds = map(x -> x[ranges[quadrant]...], cbeds)
     end
-    return align ? align_cbeds(cbeds; threshold=threshold, crop=crop) : cbeds
+    return align ? align_cbeds(cbeds; subpixel=subpixel, threshold=threshold, crop=crop) : cbeds
 end
 load_cbeds(filename; kwargs...) = load_cbeds(x->load_mat(x), filename; kwargs...)
 
@@ -557,28 +558,37 @@ function crop_center(im, w::Integer, h::Integer)
 end
 crop_center(im, l) = crop_center(im, l, l)
 
-function cbed_center(cbed; threshold=0.1)
+function cbed_center(cbed; threshold=0.1, subpixel=false)
     bw_cbed = cbed .> (maximum(cbed) * threshold)
     cbed_indices = Tuple.(findall(x -> x==1, bw_cbed))
-    Int.(round.(mean.((first.(cbed_indices), last.(cbed_indices)))))
+    if subpixel
+        (mean.((first.(cbed_indices), last.(cbed_indices))))
+    else
+        Int.(round.(mean.((first.(cbed_indices), last.(cbed_indices)))))
+    end
 end
 
 function edge_distance(cbed, center)
     hcat(center .- (1, 1)...,  size(cbed) .- center...)
 end
 
-function shift_cbed(cbed; v=cbed_center(cbed))
-    circshift(cbed, size(cbed)./2 .- v)
+function shift_cbed(cbed; v=cbed_center(cbed), subpixel=false)
+    if subpixel
+        shifted = fourier_shift(cbed, size(cbed)./2 .- v)
+        shifted = shifted .- minimum(shifted)
+    else
+        circshift(cbed, size(cbed)./2 .- v)
+    end
 end
 
-function align_cbeds(cbeds; threshold=0.1, crop=true)
-    centers = ThreadsX.map(x -> cbed_center(x; threshold=threshold), cbeds)
+function align_cbeds(cbeds; threshold=0.1, crop=true, subpixel=false)
+    centers = ThreadsX.map(x -> cbed_center(x; threshold=threshold, subpixel=subpixel), cbeds)
     if crop
         all_distance = ThreadsX.map(edge_distance, cbeds, centers)
         crop_diameter = minimum(minimum.(all_distance)) * 2
-        ThreadsX.map((x, y) -> crop_center(shift_cbed(x; v=y), crop_diameter), cbeds, centers)
+        ThreadsX.map((x, y) -> crop_center(shift_cbed(x; v=y, subpixel=subpixel), crop_diameter), cbeds, centers)
     else
-        ThreadsX.map((x, y) -> shift_cbed(x; v=y), cbeds, centers)
+        ThreadsX.map((x, y) -> shift_cbed(x; v=y, subpixel=subpixel), cbeds, centers)
     end
 end
 
