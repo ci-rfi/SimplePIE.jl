@@ -373,7 +373,7 @@ function load_mib(filename)
     return cbeds
 end
 
-function make_amplitude(cbeds; data_type=Float32) 
+function make_amplitude(cbeds; data_type=Float32)
     ThreadsX.map(x -> ifftshift(sqrt.(transpose(x)))|> Matrix{data_type}, cbeds)
 end
 
@@ -557,28 +557,46 @@ function crop_center(im, w::Integer, h::Integer)
 end
 crop_center(im, l) = crop_center(im, l, l)
 
-function cbed_center(cbed; threshold=0.1)
+function cbed_centre_radius(cbed; threshold=0.1)
+    if cbed_blank_mean(cbed)
+        return (2,2), 1
+    end
     bw_cbed = cbed .> (maximum(cbed) * threshold)
     cbed_indices = Tuple.(findall(x -> x==1, bw_cbed))
-    Int.(round.(mean.((first.(cbed_indices), last.(cbed_indices)))))
+    centre = Int.(round.(mean.((first.(cbed_indices), last.(cbed_indices)))))
+    radius = sqrt(count(bw_cbed)/pi)
+    centre, radius
 end
 
-function edge_distance(cbed, center)
-    hcat(center .- (1, 1)...,  size(cbed) .- center...)
+function cbed_blank_distribution(cbed_indices, cbed_size; stdv_scaling=0.5)
+    # need to test robustness
+    uniform_stdv = (cbed_size.^2)./12
+    stdv = std.(cbed_indices)
+    all(stdv > uniform_stdv * stdv_scaling)
+end
+
+function cbed_blank_mean(cbed, threshold=0.1)
+    # may need a more sophisticated method
+    mean(cbed) < threshold
 end
 
 function shift_cbed(cbed; v=cbed_center(cbed))
     circshift(cbed, size(cbed)./2 .- v)
 end
 
-function align_cbeds(cbeds; threshold=0.1, crop=true)
-    centers = ThreadsX.map(x -> cbed_center(x; threshold=threshold), cbeds)
+function quick_unzip(a)
+    map(x -> getfield.(a, x), fieldnames(eltype(a)))
+end
+
+function align_cbeds(cbeds; threshold=0.1, crop=false, crop_padding=1.1)
+    centres, radii = quick_unzip(ThreadsX.map(x -> (cbed_centre_radius(x; threshold=threshold)), cbeds))
+    cbeds = ThreadsX.map((x, y) -> shift_cbed(x; v=y), cbeds, centres) 
     if crop
-        all_distance = ThreadsX.map(edge_distance, cbeds, centers)
-        crop_diameter = minimum(minimum.(all_distance)) * 2
-        ThreadsX.map((x, y) -> crop_center(shift_cbed(x; v=y), crop_diameter), cbeds, centers)
+        max_rad = maximum(radii)
+        crop_diameter = ceil(Int,max_rad * crop_padding) * 2
+        ThreadsX.map((x) -> crop_center(x, crop_diameter), cbeds)
     else
-        ThreadsX.map((x, y) -> shift_cbed(x; v=y), cbeds, centers)
+        cbeds
     end
 end
 
