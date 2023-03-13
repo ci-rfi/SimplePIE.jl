@@ -584,20 +584,29 @@ function shift_cbed(cbed; v=cbed_center(cbed))
     circshift(cbed, size(cbed)./2 .- v)
 end
 
+function crop_cbed_corners(cbeds)
+    N = size(cbeds[1], 1)
+    aperture = circular_aperture(N, N/2)
+    ThreadsX.map(x -> x.*aperture, cbeds)
+end
+
 function quick_unzip(a)
     map(x -> getfield.(a, x), fieldnames(eltype(a)))
 end
 
-function align_cbeds(cbeds; threshold=0.1, crop=false, crop_padding=1.1)
+function align_cbeds(cbeds; threshold=0.1, crop=false, crop_padding=1.1, crop_corners=false)
     centres, radii = quick_unzip(ThreadsX.map(x -> (cbed_centre_radius(x; threshold=threshold)), cbeds))
     cbeds = ThreadsX.map((x, y) -> shift_cbed(x; v=y), cbeds, centres) 
-    if crop
-        max_rad = maximum(radii)
-        crop_diameter = ceil(Int,max_rad * crop_padding) * 2
-        ThreadsX.map((x) -> crop_center(x, crop_diameter), cbeds)
-    else
-        cbeds
+    if !crop
+        return cbeds
     end
+    max_rad = maximum(radii)
+    crop_diameter = ceil(Int,max_rad * crop_padding) * 2
+    cbeds = ThreadsX.map((x) -> crop_center(x, crop_diameter), cbeds)
+    if !crop_corners
+        return cbeds
+    end
+    crop_cbed_corners(cbeds)
 end
 
 function parameter_sweep(𝒜, dp₀::DataParams, rp₀::ReconParams, sp₀::SweepParams)
