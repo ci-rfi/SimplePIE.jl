@@ -47,6 +47,7 @@ export load_mat
 export load_mib
 export load_h5
 export make_amplitude
+export make_amplitude_padded
 export ptycho_iteration!
 export gpu_ptycho_iteration!
 export plot_wave
@@ -375,6 +376,12 @@ end
 
 function make_amplitude(cbeds; data_type=Float32)
     ThreadsX.map(x -> ifftshift(sqrt.(transpose(x)))|> Matrix{data_type}, cbeds)
+end
+
+function make_amplitude_padded(cbeds, N::Int; data_type=Float32)
+    cbeds = sym_paddedviews(0, zeros(N,N), ThreadsX.map(x -> sqrt.(transpose(x)), cbeds)...)
+    # sparse arrays vs padded views vs neither?
+    ThreadsX.map(x -> ifftshift(sqrt.(transpose(collect(data_type, x)))), cbeds)
 end
 
 function update!(q, a, Δψ; method="ePIE", α=0.2) 
