@@ -380,16 +380,15 @@ function make_amplitude(cbeds; data_type=Float32)
 end
 
 function make_amplitude_padded(cbeds, N::Int; data_type=Float32)
-    cbeds = sym_paddedviews(0, zeros(N,N), ThreadsX.map(x -> sqrt.(transpose(x)), cbeds)...)
-    # sparse arrays vs padded views vs neither?
-    ThreadsX.map(x -> ifftshift(sqrt.(transpose(collect(data_type, x)))), cbeds)
+    ThreadsX.map(x -> centre_padded(sqrt.(transpose(x)), N)|> Matrix{data_type}, cbeds)
 end
 
-function ifft_paddded(cbed, N::Int)
-    cb = CircularArray(zeros(N,N))
+function centre_padded(cbed, N::Int, c::Int; pad_val=0.0)
+    cb = CircularArray(fill(pad_val, (N,N)))
     cb[1-c:c, 1-c:c] = cbed
     cb
 end
+centre_padded(cbed, N::Int; kwargs...) = centre_padded(cbed, N, Int(size(cbed,1)/2); kwargs...)
 
 function update!(q, a, Δψ; method="ePIE", α=0.2) 
     if iszero(α) 
