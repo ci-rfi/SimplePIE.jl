@@ -18,6 +18,7 @@ using ThreadsX
 using CUDA
 using BenchmarkTools
 using HDF5
+using CircularArrays
 using Medipix
 
 import Configurations.from_dict
@@ -382,6 +383,12 @@ function make_amplitude_padded(cbeds, N::Int; data_type=Float32)
     cbeds = sym_paddedviews(0, zeros(N,N), ThreadsX.map(x -> sqrt.(transpose(x)), cbeds)...)
     # sparse arrays vs padded views vs neither?
     ThreadsX.map(x -> ifftshift(sqrt.(transpose(collect(data_type, x)))), cbeds)
+end
+
+function ifft_paddded(cbed, N::Int)
+    cb = CircularArray(zeros(N,N))
+    cb[1-c:c, 1-c:c] = cbed
+    cb
 end
 
 function update!(q, a, Δψ; method="ePIE", α=0.2) 
