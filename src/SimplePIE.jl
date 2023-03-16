@@ -163,15 +163,14 @@ end
 
 function circular_aperture(n, r; shift=CartesianIndex(0, 0), σ=0)
     data = Matrix{Bool}(undef, first(n), last(n))
-    if min(n...) <= 2r 
+    if min(n...) < 2r 
         @warn("Aperature area exceeds the field of view even if centered.") 
     end
     origin =  CartesianIndex(ceil.(Int, size(data) ./ 2)...) + shift
     for ind in CartesianIndices(data)
         data[ind] = hypot(Tuple(ind - origin)...) <= r ? true : false
     end
-    aperture = imfilter(data, Kernel.gaussian(σ))
-    return aperture
+    σ==0 ? data : imfilter(data, Kernel.gaussian(σ))
 end
 
 function make_grid(dₛ, θᵣ, n; offset=[zero(dₛ), zero(dₛ)])
@@ -597,11 +596,11 @@ function shift_cbed(cbed; v=cbed_center(cbed))
     circshift(cbed, size(cbed)./2 .- v)
 end
 
-function crop_cbed_corners(cbeds)
-    N = size(cbeds[1], 1)
+function crop_cbed_corners(cbeds, N::Int)
     aperture = circular_aperture(N, N/2)
     ThreadsX.map(x -> x.*aperture, cbeds)
 end
+crop_cbed_corners(cbeds) = crop_cbed_corners(cbeds, size(cbeds[1], 1))
 
 function quick_unzip(a)
     map(x -> getfield.(a, x), fieldnames(eltype(a)))
@@ -613,9 +612,9 @@ function align_cbeds(cbeds; threshold=0.1, crop=false, crop_padding=1.1, crop_co
     if !crop
         return cbeds
     end
-    max_rad = maximum(radii)
-    crop_diameter = ceil(Int,max_rad * crop_padding) * 2
-    cbeds = ThreadsX.map((x) -> crop_center(x, crop_diameter), cbeds)
+    r = maximum(radii)
+    d = ceil(Int,r * crop_padding) * 2
+    cbeds = ThreadsX.map((x) -> crop_center(x, d), cbeds)
     if !crop_corners
         return cbeds
     end
