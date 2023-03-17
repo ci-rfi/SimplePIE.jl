@@ -7,6 +7,7 @@ using Unitful: Å, nm, μm, °, kV, mrad
 using Rotations
 using MAT
 using Statistics: mean
+#using StatsBase
 using FFTW
 using Images
 using Plots
@@ -20,6 +21,7 @@ using BenchmarkTools
 using HDF5
 using CircularArrays
 using Medipix
+#using ProgressBars
 
 import Configurations.from_dict
 import Configurations.to_dict
@@ -378,16 +380,20 @@ function make_amplitude(cbeds; data_type=Float32)
     ThreadsX.map(x -> ifftshift(sqrt.(transpose(x)))|> Matrix{data_type}, cbeds)
 end
 
-function make_amplitude_padded(cbeds, N::Int; data_type=Float32)
-    ThreadsX.map(x -> centre_padded(sqrt.(transpose(x)), N)|> Matrix{data_type}, cbeds)
+function make_amplitude_unshifted(cbeds; data_type=Float32)
+    ThreadsX.map(x -> Matrix{data_type}(sqrt.(transpose(x))), cbeds)
 end
 
-function centre_padded(cbed, N::Int, c::Int; pad_val=0.0)
+function make_amplitude_padded(cbeds, N::Int; data_type=Float32)
+    ThreadsX.map(x -> pad_centre(sqrt.(transpose(x)), N)|> Matrix{data_type}, cbeds)
+end
+
+function pad_centre(cbed, N::Int, c::Int; pad_val=0.0)
     cb = CircularArray(fill(pad_val, (N,N)))
     cb[1-c:c, 1-c:c] = cbed
-    cb
+    cb|>Matrix
 end
-centre_padded(cbed, N::Int; kwargs...) = centre_padded(cbed, N, Int(size(cbed,1)/2); kwargs...)
+pad_centre(cbed, N::Int; kwargs...) = pad_centre(cbed, N, Int(size(cbed,1)/2); kwargs...)
 
 function update!(q, a, Δψ; method="ePIE", α=0.2) 
     if iszero(α) 
@@ -419,6 +425,9 @@ function update!(q, a, Δψ; method="ePIE", α=0.2)
 end
 
 function ptycho_iteration!(𝒪, 𝒫, 𝒜; method="ePIE", α=0.2, β=0.2, scaling_factor=1.0)
+    if size(𝒫,1) != size(𝒜,1)
+        𝒜 = pad_centre(𝒜, size(𝒫,1))
+    end
     ψ₁ = 𝒪 .* 𝒫
     𝒟 = 𝒜 .* sign.(fft(ifftshift(ψ₁)))
     ψ₂ = fftshift(ifft(𝒟))
@@ -484,6 +493,7 @@ function ptycho_reconstruction!(𝒪, ℴ, 𝒫, 𝒜; method="ePIE", ni=1, α=F
     ngpu = length(GPUs)
     for _ in 1:ni
         @time if ngpu == 0
+            #Threads.@threads for i in ProgressBar(shuffle(eachindex(𝒜)))
             Threads.@threads for i in shuffle(eachindex(𝒜))
                 ptycho_iteration!(ℴ[i], 𝒫, 𝒜[i]; method=method, α=α, β=β, scaling_factor=scaling_factor)
             end
@@ -612,7 +622,7 @@ function align_cbeds(cbeds; threshold=0.1, crop=false, crop_padding=1.1, crop_co
     if !crop
         return cbeds
     end
-    r = maximum(radii)
+    r = percentile(radii, 95)
     d = ceil(Int,r * crop_padding) * 2
     cbeds = ThreadsX.map((x) -> crop_center(x, d), cbeds)
     if !crop_corners
