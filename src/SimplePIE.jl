@@ -7,7 +7,7 @@ using Unitful: Å, nm, μm, °, kV, mrad
 using Rotations
 using MAT
 using Statistics: mean
-#using StatsBase
+using StatsBase
 using FFTW
 using Images
 using Plots
@@ -616,19 +616,21 @@ function quick_unzip(a)
     map(x -> getfield.(a, x), fieldnames(eltype(a)))
 end
 
-function align_cbeds(cbeds; threshold=0.1, crop=false, crop_padding=1.1, crop_corners=false)
+function align_cbeds(cbeds; threshold=0.1, crop=false, crop_padding=1.1, crop_corners=false, data_type=nothing)
     centres, radii = quick_unzip(ThreadsX.map(x -> (cbed_centre_radius(x; threshold=threshold)), cbeds))
     cbeds = ThreadsX.map((x, y) -> shift_cbed(x; v=y), cbeds, centres) 
-    if !crop
-        return cbeds
+    if crop
+        r = StatsBase.percentile(radii, 95)
+        d = ceil(Int,r * crop_padding) * 2
+        cbeds = ThreadsX.map((x) -> crop_center(x, d), cbeds)
     end
-    r = percentile(radii, 95)
-    d = ceil(Int,r * crop_padding) * 2
-    cbeds = ThreadsX.map((x) -> crop_center(x, d), cbeds)
-    if !crop_corners
-        return cbeds
+    if crop_corners
+        cbeds = crop_cbed_corners(cbeds)
     end
-    crop_cbed_corners(cbeds)
+    if !isnothing(data_type)
+        cbeds = ThreadsX.map(x -> Matrix{data_type}(x), cbeds)
+    end
+    cbeds
 end
 
 function parameter_sweep(𝒜, dp₀::DataParams, rp₀::ReconParams, sp₀::SweepParams)
