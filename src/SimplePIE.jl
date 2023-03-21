@@ -19,6 +19,7 @@ using CUDA
 using BenchmarkTools
 using HDF5
 using Medipix
+using ProgressBars
 
 import Configurations.from_dict
 import Configurations.to_dict
@@ -472,11 +473,11 @@ function ptycho_reconstruction!(𝒪, ℴ, 𝒫, 𝒜; method="ePIE", ni=1, α=F
     ngpu = length(GPUs)
     for _ in 1:ni
         @time if ngpu == 0
-            Threads.@threads for i in shuffle(eachindex(𝒜))
+            Threads.@threads for i in ProgressBar(shuffle(eachindex(𝒜)))
                 ptycho_iteration!(ℴ[i], 𝒫, 𝒜[i]; method=method, α=α, β=β, scaling_factor=scaling_factor)
             end
         else 
-            Threads.@threads for i in shuffle(eachindex(𝒜))
+            Threads.@threads for i in ProgressBar(shuffle(eachindex(𝒜)))
                 CUDA.device!(GPUs[i % ngpu + 1])
                 gpu_ptycho_iteration!(ℴ[i], 𝒫, 𝒜[i]; method=method, α=α, β=β, scaling_factor=scaling_factor)
             end
