@@ -409,7 +409,12 @@ end
 
 function ptycho_iteration!(𝒪, 𝒫, 𝒜; method="ePIE", α=0.2, β=0.2, scaling_factor=1.0)
     ψ₁ = 𝒪 .* 𝒫
-    𝒟 = 𝒜 .* sign.(fft(ifftshift(ψ₁)))
+    if eltype(𝒜) <: Complex
+        Ψ₁ = fft(ifftshift(ψ₁))
+        𝒟 = ((real(𝒜) .* imag(𝒜)) .+ (abs.(Ψ₁) .* (1 .- imag(𝒜)))) .* sign.(Ψ₁)
+    else
+        𝒟 = 𝒜 .* sign.(fft(ifftshift(ψ₁)))
+    end
     ψ₂ = fftshift(ifft(𝒟))
     Δψ = ψ₂ - ψ₁
     scaling_factor = convert(eltype(real(𝒫)), scaling_factor)
