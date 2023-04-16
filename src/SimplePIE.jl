@@ -409,21 +409,12 @@ end
 
 function ptycho_iteration!(𝒪, 𝒫, 𝒜; method="ePIE", α=0.2, β=0.2, scaling_factor=1.0)
     ψ₁ = 𝒪 .* 𝒫
-    𝒟 = 𝒜 .* sign.(fft(ifftshift(ψ₁)))
-    ψ₂ = fftshift(ifft(𝒟))
-    Δψ = ψ₂ - ψ₁
-    scaling_factor = convert(eltype(real(𝒫)), scaling_factor)
-    𝒫[:] = 𝒫 * √(scaling_factor / sum(abs.(𝒫).^2))
-    update!(𝒪, 𝒫, Δψ; method=method, α=α)
-    update!(𝒫, 𝒪, Δψ; method=method, α=β)
-    return nothing
-end
-
-function ptycho_iteration!(𝒪, 𝒫, 𝒜, ℳ::Matrix{Bool}; method="ePIE", α=0.2, β=0.2, scaling_factor=1.0)
-    ψ₁ = 𝒪 .* 𝒫
-    Ψ₁ = fft(ifftshift(ψ₁))
-    𝒟 = ((𝒜 .* ℳ) .+ (abs.(Ψ₁) .* .!ℳ)) .* sign.(Ψ₁)
-    # print("$(𝒜 == ((𝒜 .* ℳ) .+ (abs.(Ψ₁) .* .!ℳ)))")
+    if eltype(𝒜) <: Complex
+        Ψ₁ = fft(ifftshift(ψ₁))
+        𝒟 = ((real(𝒜) .* imag(𝒜)) .+ (abs.(Ψ₁) .* (1 .- imag(𝒜)))) .* sign.(Ψ₁)
+    else
+        𝒟 = 𝒜 .* sign.(fft(ifftshift(ψ₁)))
+    end
     ψ₂ = fftshift(ifft(𝒟))
     Δψ = ψ₂ - ψ₁
     scaling_factor = convert(eltype(real(𝒫)), scaling_factor)
@@ -438,17 +429,6 @@ function gpu_ptycho_iteration!(𝒪_cpu, 𝒫_cpu, 𝒜_cpu; method="ePIE", α::
     𝒫 = CuArray(copy(𝒫_cpu.data))
     𝒜 = CuArray(𝒜_cpu)
     ptycho_iteration!(𝒪, 𝒫, 𝒜; method=method, α=α, β=β, scaling_factor=scaling_factor)
-    copyto!(𝒪_cpu, Array(𝒪))
-    copyto!(𝒫_cpu, Array(𝒫))
-    return nothing
-end
-
-function gpu_ptycho_iteration!(𝒪_cpu, 𝒫_cpu, 𝒜_cpu, ℳ_cpu::Matrix{Bool}; method="ePIE", α::Float32=Float32(0.2), β::Float32=Float32(0.2), scaling_factor=1.0)
-    𝒪 = CuArray(copy(𝒪_cpu.data))
-    𝒫 = CuArray(copy(𝒫_cpu.data))
-    𝒜 = CuArray(𝒜_cpu)
-    ℳ = CuArray(ℳ_cpu)
-    ptycho_iteration!(𝒪, 𝒫, 𝒜, ℳ; method=method, α=α, β=β, scaling_factor=scaling_factor)
     copyto!(𝒪_cpu, Array(𝒪))
     copyto!(𝒫_cpu, Array(𝒫))
     return nothing
@@ -516,36 +496,9 @@ function ptycho_reconstruction!(𝒪, ℴ, 𝒫, 𝒜; method="ePIE", ni=1, α=F
     return nothing
 end
 
-function ptycho_reconstruction!(𝒪, ℴ, 𝒫, 𝒜, ℳ; method="ePIE", ni=1, α=Float32(0.01), β=Float32(0.01), scaling_factor=1.0, GPUs::Vector{Int}=Int[], plotting=false)
-    ngpu = length(GPUs)
-    for _ in 1:ni
-        @time if ngpu == 0
-            Threads.@threads for i in ProgressBar(shuffle(eachindex(𝒜)))
-                ptycho_iteration!(ℴ[i], 𝒫, 𝒜[i], ℳ[i]; method=method, α=α, β=β, scaling_factor=scaling_factor)
-            end
-        else
-            Threads.@threads for i in ProgressBar(shuffle(eachindex(𝒜)))
-                CUDA.device!(GPUs[i % ngpu + 1])
-                gpu_ptycho_iteration!(ℴ[i], 𝒫, 𝒜[i], ℳ[i]; method=method, α=α, β=β, scaling_factor=scaling_factor)
-            end
-        end
-
-        if plotting
-            display(plot_wave(𝒫))
-            display(plot_wave(𝒪))
-        end
-    end
-    return nothing
-end
-
 function ptycho_reconstruction!(𝒪, ℴ, 𝒫, 𝒜, dp::DataParams, rp::ReconParams)
     ni = length(range(rp.iteration_start, rp.iteration_end))
     ptycho_reconstruction!(𝒪, ℴ, 𝒫, 𝒜; method=rp.method, ni=ni, α=rp.alpha, β=rp.beta, scaling_factor=dp.scaling_factor, GPUs=rp.GPUs, plotting=rp.plotting)
-end
-
-function ptycho_reconstruction!(𝒪, ℴ, 𝒫, 𝒜, ℳ, dp::DataParams, rp::ReconParams)
-    ni = length(range(rp.iteration_start, rp.iteration_end))
-    ptycho_reconstruction!(𝒪, ℴ, 𝒫, 𝒜, ℳ; method=rp.method, ni=ni, α=rp.alpha, β=rp.beta, scaling_factor=dp.scaling_factor, GPUs=rp.GPUs, plotting=rp.plotting)
 end
 
 function save_object(filename, 𝒪; object_name="", object_params=ObjectParams(), data_type=ComplexF32)
