@@ -21,7 +21,7 @@ using BenchmarkTools
 using HDF5
 using CircularArrays
 using Medipix
-#using ProgressBars
+using ProgressBars
 
 import Configurations.from_dict
 import Configurations.to_dict
@@ -429,7 +429,12 @@ function ptycho_iteration!(𝒪, 𝒫, 𝒜; method="ePIE", α=0.2, β=0.2, scal
         𝒜 = pad_centre(𝒜, size(𝒫,1))
     end
     ψ₁ = 𝒪 .* 𝒫
-    𝒟 = 𝒜 .* sign.(fft(ifftshift(ψ₁)))
+    if eltype(𝒜) <: Complex
+        Ψ₁ = fft(ifftshift(ψ₁))
+        𝒟 = ((real(𝒜) .* imag(𝒜)) .+ (abs.(Ψ₁) .* (1 .- imag(𝒜)))) .* sign.(Ψ₁)
+    else
+        𝒟 = 𝒜 .* sign.(fft(ifftshift(ψ₁)))
+    end
     ψ₂ = fftshift(ifft(𝒟))
     Δψ = ψ₂ - ψ₁
     scaling_factor = convert(eltype(real(𝒫)), scaling_factor)
@@ -493,12 +498,11 @@ function ptycho_reconstruction!(𝒪, ℴ, 𝒫, 𝒜; method="ePIE", ni=1, α=F
     ngpu = length(GPUs)
     for _ in 1:ni
         @time if ngpu == 0
-            #Threads.@threads for i in ProgressBar(shuffle(eachindex(𝒜)))
-            Threads.@threads for i in shuffle(eachindex(𝒜))
+            Threads.@threads for i in ProgressBar(shuffle(eachindex(𝒜)))
                 ptycho_iteration!(ℴ[i], 𝒫, 𝒜[i]; method=method, α=α, β=β, scaling_factor=scaling_factor)
             end
         else 
-            Threads.@threads for i in shuffle(eachindex(𝒜))
+            Threads.@threads for i in ProgressBar(shuffle(eachindex(𝒜)))
                 CUDA.device!(GPUs[i % ngpu + 1])
                 gpu_ptycho_iteration!(ℴ[i], 𝒫, 𝒜[i]; method=method, α=α, β=β, scaling_factor=scaling_factor)
             end
