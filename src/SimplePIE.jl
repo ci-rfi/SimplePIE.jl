@@ -75,6 +75,9 @@ export parameter_sweep
 export positions_in_roi
 export linear_positions
 
+export propagation_exponential
+export propagate_wave
+
 @option mutable struct DataParams
     project::String = "default_project"
     session::String = "default_session"
@@ -675,5 +678,28 @@ function linear_positions(grid, positions)
     end
 end
 linear_positions(dp::DataParams, positions; kwargs...) = linear_positions(make_grid(dp; kwargs...), positions)
+
+# propagation
+
+function propagation_exponential(distance, N, Δk, λ; data_type=Float32)
+    Δkₓ = sin(Δk)
+    ks = (-N/2:N/2-1) * Δkₓ
+    prefactor = im * data_type(pi * distance / λ)
+    #TODO: optimise making symmetric matrix
+    # only 1/8th of this work is really needed
+    exp_array = ifftshift([exp(prefactor*(kx^2 + ky^2)) for kx in ks, ky in ks])
+    AxisArray(exp_array; x = ks, y = ks)
+end
+propagation_exponential(distance, dp::DataParams) = propagation_exponential(distance, dp.detector_array_size[1], dp.fourier_space_sampling, dp.wavelength)
+
+function propagate_wave(𝒲, distance, data_params)
+    prop_exp = propagation_exponential(distance, data_params)
+    res = ifftshift(ifft(fft(fftshift(𝒲.*1)).*prop_exp))
+    # need to figure out keeping axes from previous calc
+    # shouldn't be this hard?   
+    ax = (1nm:1nm:size(res)[1]nm)
+    res_ax = AxisArray(res, x=ax, y=ax)
+    return res_ax
+end
 
 end
