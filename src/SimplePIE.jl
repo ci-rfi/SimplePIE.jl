@@ -172,8 +172,7 @@ function circular_aperture(n, r; shift=CartesianIndex(0, 0), σ=0)
     for ind in CartesianIndices(data)
         data[ind] = hypot(Tuple(ind - origin)...) <= r ? true : false
     end
-    aperture = imfilter(data, Kernel.gaussian(σ))
-    return aperture
+    σ == 0 ? data : imfilter(data, Kernel.gaussian(σ))
 end
 
 function make_grid(dₛ, θᵣ, n; offset=[zero(dₛ), zero(dₛ)])
