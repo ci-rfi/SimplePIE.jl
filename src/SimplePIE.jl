@@ -77,6 +77,7 @@ export linear_positions
 
 export propagation_exponential
 export propagate_wave
+export topographic_ptycho_reconstruction!
 
 @option mutable struct DataParams
     project::String = "default_project"
@@ -436,6 +437,34 @@ function gpu_ptycho_iteration!(𝒪_cpu, 𝒫_cpu, 𝒜_cpu; method="ePIE", α::
     return nothing
 end
 
+function elevated_ptycho_iteration!(𝒪, 𝒫, 𝒜, h₀₋₂, h₀₋₁, dp::DataParams; method="ePIE", α=0.2, β=0.2, scaling_factor=1.0)
+    # ₀ initial probe plane
+    # ₁ object plane
+    # ₂ detector plane
+    #
+    # ₚ predicted (from previous object/probe)
+    # ₑ experimental (from cbed)
+    h₁₋₂ = h₀₋₂ - h₀₋₁
+    𝒫₁ₚ = propagate_wave(𝒫, h₀₋₁, dp)
+    ψ₁ₚ = 𝒪 .* 𝒫₁ₚ
+    if eltype(𝒜) <: Complex
+        Ψ₁ = fft(ifftshift(ψ₁))
+        𝒟 = ((real(𝒜) .* imag(𝒜)) .+ (abs.(Ψ₁) .* (1 .- imag(𝒜)))) .* sign.(Ψ₁)
+    else
+        𝒟 = 𝒜 .* sign.(fft(ifftshift(ψ₁ₚ)))
+    end
+    ψ₂ₑ = fftshift(ifft(𝒟))
+    ψ₁ₑ = propagate_wave(ψ₂ₑ, -h₁₋₂, dp)
+    Δψ₁ = ψ₁ₑ - ψ₁ₚ
+    update!(𝒪, 𝒫₁ₚ, Δψ₁; method=method, α=α)
+    ψ₀ₑ = propagate_wave(ψ₂ₑ, -h₀₋₂, dp)
+    Δψ₀ = ψ₀ₑ - 𝒫
+    update!(𝒫, 𝒪, Δψ₀; method=method, α=β)
+    scaling_factor = convert(eltype(real(𝒫)), scaling_factor)
+    𝒫[:] = 𝒫 * √(scaling_factor / sum(abs.(𝒫).^2))
+    return nothing
+end
+
 function plot_amplitude(𝒲; with_unit=true, kwargs...)
     amplitude = abs.(𝒲)
     if with_unit
@@ -496,6 +525,25 @@ function ptycho_reconstruction!(𝒪, ℴ, 𝒫, 𝒜; method="ePIE", ni=1, α=F
         end
     end
     return nothing
+end
+
+function topographic_ptycho_reconstruction!(𝒪, ℴ, 𝒫, 𝒜, height_map, dp::DataParams; method="ePIE", ni=1, α=Float32(0.01), β=Float32(0.01), scaling_factor=1.0, GPUs::Vector{Int}=Int[], plotting=false)
+    h₂ = maximum(height_map)
+    for _ in 1:ni
+        @time Threads.@threads for i in ProgressBar(shuffle(eachindex(𝒜)))
+                elevated_ptycho_iteration!(ℴ[i], 𝒫, 𝒜[i], h₂, height_map[i], dp; method=method, α=α, β=β, scaling_factor=scaling_factor)
+        end
+        if plotting
+            display(plot_wave(𝒫))
+            display(plot_wave(𝒪))
+        end
+    end
+    return nothing
+end
+
+function topographic_ptycho_reconstruction!(𝒪, ℴ, 𝒫, 𝒜, height_map, dp::DataParams, rp::ReconParams)
+    ni = length(range(rp.iteration_start, rp.iteration_end))
+    topographic_ptycho_reconstruction!(𝒪, ℴ, 𝒫, 𝒜, height_map, dp; method=rp.method, ni=ni, α=rp.alpha, β=rp.beta, scaling_factor=dp.scaling_factor, GPUs=rp.GPUs, plotting=rp.plotting)
 end
 
 function ptycho_reconstruction!(𝒪, ℴ, 𝒫, 𝒜, dp::DataParams, rp::ReconParams)
