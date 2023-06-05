@@ -77,7 +77,6 @@ export linear_positions
 
 export propagation_exponential
 export propagate_wave
-export topographic_ptycho_reconstruction!
 
 @option mutable struct DataParams
     project::String = "default_project"
@@ -437,7 +436,7 @@ function gpu_ptycho_iteration!(𝒪_cpu, 𝒫_cpu, 𝒜_cpu; method="ePIE", α::
     return nothing
 end
 
-function elevated_ptycho_iteration!(𝒪, 𝒫, 𝒜, h₀₋₂, h₀₋₁, dp::DataParams; method="ePIE", α=0.2, β=0.2, scaling_factor=1.0)
+function elevated_ptycho_iteration!(𝒪, 𝒫₀ₚ, 𝒜, h₀₋₂, h₀₋₁, dp::DataParams; method="ePIE", α=0.2, β=0.2, scaling_factor=1.0)
     # ₀ initial probe plane
     # ₁ object plane
     # ₂ detector plane
@@ -445,23 +444,20 @@ function elevated_ptycho_iteration!(𝒪, 𝒫, 𝒜, h₀₋₂, h₀₋₁, dp
     # ₚ predicted (from previous object/probe)
     # ₑ experimental (from cbed)
     h₁₋₂ = h₀₋₂ - h₀₋₁
-    𝒫₁ₚ = propagate_wave(𝒫, h₀₋₁, dp)
+    𝒫₁ₚ = propagate_wave(𝒫₀ₚ, h₀₋₁, dp)
     ψ₁ₚ = 𝒪 .* 𝒫₁ₚ
-    if eltype(𝒜) <: Complex
-        Ψ₁ = fft(ifftshift(ψ₁))
-        𝒟 = ((real(𝒜) .* imag(𝒜)) .+ (abs.(Ψ₁) .* (1 .- imag(𝒜)))) .* sign.(Ψ₁)
-    else
-        𝒟 = 𝒜 .* sign.(fft(ifftshift(ψ₁ₚ)))
-    end
+    ψ₂ₚ = propagate_wave(ψ₁ₚ, h₁₋₂, dp)
+    𝒟 = 𝒜 .* sign.(fft(ifftshift(ψ₂ₚ .* 1)))
     ψ₂ₑ = fftshift(ifft(𝒟))
     ψ₁ₑ = propagate_wave(ψ₂ₑ, -h₁₋₂, dp)
     Δψ₁ = ψ₁ₑ - ψ₁ₚ
     update!(𝒪, 𝒫₁ₚ, Δψ₁; method=method, α=α)
-    ψ₀ₑ = propagate_wave(ψ₂ₑ, -h₀₋₂, dp)
-    Δψ₀ = ψ₀ₑ - 𝒫
-    update!(𝒫, 𝒪, Δψ₀; method=method, α=β)
-    scaling_factor = convert(eltype(real(𝒫)), scaling_factor)
-    𝒫[:] = 𝒫 * √(scaling_factor / sum(abs.(𝒫).^2))
+    𝒫₁ₑ = ψ₁ₑ ./ 𝒪
+    𝒫₀ₑ = propagate_wave(𝒫₁ₑ, -h₀₋₁, dp)
+    Δψ₀ = 𝒫₀ₑ - 𝒫₀ₚ
+    update!(𝒫₀ₚ, 𝒪, Δψ₀; method=method, α=β)
+    scaling_factor = convert(eltype(real(𝒫₀ₚ)), scaling_factor)
+    𝒫₀ₚ[:] = 𝒫₀ₚ * √(scaling_factor / sum(abs.(𝒫₀ₚ).^2))
     return nothing
 end
 
@@ -505,10 +501,18 @@ function wave_image(𝒲; unwrap_phase=false)
     return amplitude_image(𝒲), phase_image(𝒲; unwrap_phase=unwrap_phase)
 end
 
-function ptycho_reconstruction!(𝒪, ℴ, 𝒫, 𝒜; method="ePIE", ni=1, α=Float32(0.01), β=Float32(0.01), scaling_factor=1.0, GPUs::Vector{Int}=Int[], plotting=false)
+function ptycho_reconstruction!(𝒪, ℴ, 𝒫, 𝒜; method="ePIE", ni=1, α=Float32(0.01), β=Float32(0.01), scaling_factor=1.0, GPUs::Vector{Int}=Int[], plotting=false, height_map=nothing, dp=nothing)
     ngpu = length(GPUs)
+    if isnothing(height_map)
+        
+    end
     for _ in 1:ni
-        @time if ngpu == 0
+        @time if !isnothing(height_map)
+            h₂ = maximum(height_map)
+            Threads.@threads for i in ProgressBar(shuffle(eachindex(𝒜)))
+                elevated_ptycho_iteration!(ℴ[i], 𝒫, 𝒜[i], h₂, height_map[i], dp; method=method, α=α, β=β, scaling_factor=scaling_factor)
+            end
+        elseif ngpu == 0
             Threads.@threads for i in ProgressBar(shuffle(eachindex(𝒜)))
                 ptycho_iteration!(ℴ[i], 𝒫, 𝒜[i]; method=method, α=α, β=β, scaling_factor=scaling_factor)
             end
@@ -527,28 +531,9 @@ function ptycho_reconstruction!(𝒪, ℴ, 𝒫, 𝒜; method="ePIE", ni=1, α=F
     return nothing
 end
 
-function topographic_ptycho_reconstruction!(𝒪, ℴ, 𝒫, 𝒜, height_map, dp::DataParams; method="ePIE", ni=1, α=Float32(0.01), β=Float32(0.01), scaling_factor=1.0, GPUs::Vector{Int}=Int[], plotting=false)
-    h₂ = maximum(height_map)
-    for _ in 1:ni
-        @time Threads.@threads for i in ProgressBar(shuffle(eachindex(𝒜)))
-                elevated_ptycho_iteration!(ℴ[i], 𝒫, 𝒜[i], h₂, height_map[i], dp; method=method, α=α, β=β, scaling_factor=scaling_factor)
-        end
-        if plotting
-            display(plot_wave(𝒫))
-            display(plot_wave(𝒪))
-        end
-    end
-    return nothing
-end
-
-function topographic_ptycho_reconstruction!(𝒪, ℴ, 𝒫, 𝒜, height_map, dp::DataParams, rp::ReconParams)
+function ptycho_reconstruction!(𝒪, ℴ, 𝒫, 𝒜, dp::DataParams, rp::ReconParams; height_map=nothing)
     ni = length(range(rp.iteration_start, rp.iteration_end))
-    topographic_ptycho_reconstruction!(𝒪, ℴ, 𝒫, 𝒜, height_map, dp; method=rp.method, ni=ni, α=rp.alpha, β=rp.beta, scaling_factor=dp.scaling_factor, GPUs=rp.GPUs, plotting=rp.plotting)
-end
-
-function ptycho_reconstruction!(𝒪, ℴ, 𝒫, 𝒜, dp::DataParams, rp::ReconParams)
-    ni = length(range(rp.iteration_start, rp.iteration_end))
-    ptycho_reconstruction!(𝒪, ℴ, 𝒫, 𝒜; method=rp.method, ni=ni, α=rp.alpha, β=rp.beta, scaling_factor=dp.scaling_factor, GPUs=rp.GPUs, plotting=rp.plotting)
+    ptycho_reconstruction!(𝒪, ℴ, 𝒫, 𝒜; method=rp.method, ni=ni, α=rp.alpha, β=rp.beta, scaling_factor=dp.scaling_factor, GPUs=rp.GPUs, plotting=rp.plotting, height_map=height_map, dp=dp)
 end
 
 function save_object(filename, 𝒪; object_name="", object_params=ObjectParams(), data_type=ComplexF32)
@@ -726,24 +711,32 @@ function linear_positions(grid, positions)
 end
 linear_positions(dp::DataParams, positions; kwargs...) = linear_positions(make_grid(dp; kwargs...), positions)
 
-# propagation
+#propagation
+
+propagators = Dict{typeof(1.0),Any}()
 
 function propagation_exponential(distance, N, Δk, λ; data_type=Float32)
+    unitless_dist = ustrip(u"μm", distance)
+    if haskey(propagators, unitless_dist)
+        return propagators[unitless_dist]
+    end
     Δkₓ = sin(Δk)
     ks = (-N/2:N/2-1) * Δkₓ
     prefactor = im * data_type(pi * distance / λ)
     #TODO: optimise making symmetric matrix
     # only 1/8th of this work is really needed
     exp_array = ifftshift([exp(prefactor*(kx^2 + ky^2)) for kx in ks, ky in ks])
-    AxisArray(exp_array; x = ks, y = ks)
+    exp_axis_array = AxisArray(exp_array; x = ks, y = ks)
+    propagators[unitless_dist] = exp_axis_array
+    exp_axis_array
 end
 propagation_exponential(distance, dp::DataParams) = propagation_exponential(distance, dp.detector_array_size[1], dp.fourier_space_sampling, dp.wavelength)
 
 function propagate_wave(𝒲, distance, data_params)
-    prop_exp = propagation_exponential(distance, data_params)
-    res = ifftshift(ifft(fft(fftshift(𝒲.*1)).*prop_exp))
-    # need to figure out keeping axes from previous calc
-    # shouldn't be this hard?   
+    propagator = propagation_exponential(distance, data_params)
+    res = ifftshift(ifft(fft(fftshift(𝒲.*1)).*propagator))
+    # need to figure out keeping axes from previous calc 
+    # shouldn't be this hard? 
     ax = (1nm:1nm:size(res)[1]nm)
     res_ax = AxisArray(res, x=ax, y=ax)
     return res_ax
