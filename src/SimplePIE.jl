@@ -419,8 +419,9 @@ function ptycho_iteration!(𝒪, 𝒫, 𝒜; method="ePIE", α=0.2, β=0.2, scal
     Δψ = ψ₂ - ψ₁
     scaling_factor = convert(eltype(real(𝒫)), scaling_factor)
     𝒫[:] = 𝒫 * √(scaling_factor / sum(abs.(𝒫).^2))
+    𝒪ᵢ = copy(𝒪)
     update!(𝒪, 𝒫, Δψ; method=method, α=α)
-    update!(𝒫, 𝒪, Δψ; method=method, α=β)
+    update!(𝒫, 𝒪ᵢ, Δψ; method=method, α=β)
     return nothing
 end
 
