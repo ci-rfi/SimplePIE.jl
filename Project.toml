@@ -32,7 +32,7 @@ Unitful = "1986cc42-f94f-5a68-af5c-568840ba703d"
 [compat]
 AxisArrays = "0.4"
 BenchmarkTools = "1"
-CUDA = "3"
+CUDA = "3, 5"
 Configurations = "0.17"
 CoordinateTransformations = "0.6"
 DSP = "0.7"
